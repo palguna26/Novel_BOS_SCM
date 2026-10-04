@@ -1,0 +1,35 @@
+{
+  "name": "@scm/api",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/src/main.js",
+    "test": "jest --runInBand",
+    "seed": "tsx scripts/seed-v2.ts",
+    "seed:legacy": "tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "dotenv": "^16.4.7",
+    "nodemailer": "^7.0.3",
+    "pdfjs-dist": "^5.4.149",
+    "multer": "^2.0.2"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^11.0.0",
+    "@types/express": "^5.0.3",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.0.0",
+    "@types/nodemailer": "^7.0.1",
+    "jest": "^30.0.0",
+    "ts-jest": "^29.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
