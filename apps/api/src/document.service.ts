@@ -1,18 +1,24 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import * as fs from 'node:fs/promises'; import * as path from 'node:path'; import * as crypto from 'node:crypto';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import * as path from 'node:path'; import * as crypto from 'node:crypto';
 import { normalizeDocument } from './document-extractor';
 import { SupabaseService } from './supabase.service';
 import { ExtractionMetadata, OpenRouterExtractor } from './openrouter-extractor';
 import { resolveSkuLines } from './sku-resolver';
-export interface DocumentStorage { save(name:string,data:Buffer):Promise<string>; read(file:string):Promise<Buffer>; }
-@Injectable() export class LocalDocumentStorage implements DocumentStorage {
- private root=path.resolve(process.env.STORAGE_DIR||'./storage','documents');
- async save(name:string,data:Buffer){await fs.mkdir(this.root,{recursive:true}); const safe=`${Date.now()}-${name.replace(/[^a-z0-9._-]/gi,'_')}`; await fs.writeFile(path.join(this.root,safe),data); return path.join(this.root,safe);}
- async read(file:string){return fs.readFile(file)}
+export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,mediaType?:string,scope?:string):Promise<string>; }
+@Injectable() export class SupabaseDocumentStorage implements DocumentStorage {
+ bucket=process.env.DOCUMENT_STORAGE_BUCKET||'scm-documents';
+ constructor(private readonly supabase:SupabaseService){}
+ async save(name:string,data:Buffer,mediaType='application/octet-stream',scope='unassigned'){
+  const safe=name.replace(/[^a-z0-9._-]/gi,'_');
+  const objectPath=`${scope}/documents/${Date.now()}-${crypto.randomUUID()}-${safe}`;
+  const {error}=await this.supabase.client.storage.from(this.bucket).upload(objectPath,data,{contentType:mediaType,upsert:false});
+  if(error)throw new BadRequestException(`Document storage failed: ${error.message}`);
+  return objectPath;
+ }
 }
 @Injectable() export class DocumentService {
- constructor(private storage:LocalDocumentStorage,private supabase:SupabaseService,private openRouter:OpenRouterExtractor){}
- async saveAndExtract(name:string,data:Buffer,user?:any,idempotencyKey?:string,mediaType='application/octet-stream',extractedText?:string){this.validateUpload(name,data,mediaType);const file=await this.storage.save(name,data); let text=extractedText||'';
+ constructor(private storage:SupabaseDocumentStorage,private supabase:SupabaseService,private openRouter:OpenRouterExtractor){}
+ async saveAndExtract(name:string,data:Buffer,user?:any,idempotencyKey?:string,mediaType='application/octet-stream',extractedText?:string){this.validateUpload(name,data,mediaType);const file=await this.storage.save(name,data,mediaType,user?.companyId); let text=extractedText||'';
   if(!text&&name.toLowerCase().endsWith('.pdf')){try{const pdfjs:any=await import('pdfjs-dist/legacy/build/pdf.mjs'); const pdf=await pdfjs.getDocument({data:new Uint8Array(data)}).promise; for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i); const c=await page.getTextContent(); text+=this.pageText(c.items||[])+'\n';}}catch{ text=''; }}
   const extractionStarted=Date.now(); let extracted; let extraction:ExtractionMetadata;
   if(this.openRouter.isConfigured()){
@@ -22,8 +28,18 @@ export interface DocumentStorage { save(name:string,data:Buffer):Promise<string>
   extracted = await this.resolveSkuItems(extracted, user);
   const sha256=this.hash(data);
   let registration:any=null;
-  if(user?.companyId){const {data:registered,error}=await this.supabase.rpc<any>('documents','register_extraction',{p_payload:{companyId:user.companyId,documentType:extracted.kind,businessKey:extracted.externalId||extracted.appointmentId,filename:name,storageBucket:'local',storagePath:file,mediaType,byteSize:data.length,sha256,confidence:extracted.confidence,extracted:{...extracted,_extraction:extraction}},p_actor_id:user.id,p_idempotency_key:idempotencyKey||crypto.randomUUID()});if(error)throw new Error(error.message);registration=registered;}
+  if(user?.companyId){const {data:registered,error}=await this.supabase.rpc<any>('documents','register_extraction',{p_payload:{companyId:user.companyId,documentType:extracted.kind,businessKey:extracted.externalId||extracted.appointmentId,filename:name,storageBucket:this.storage.bucket,storagePath:file,mediaType,byteSize:data.length,sha256,confidence:extracted.confidence,extracted:{...extracted,_extraction:extraction}},p_actor_id:user.id,p_idempotency_key:idempotencyKey||crypto.randomUUID()});if(error)throw new Error(error.message);registration=registered;}
   return {file,filename:name,sha256,extracted,confidence:extracted.confidence,warnings:extracted.warnings,extraction,...registration};
+ }
+ async signedUrl(documentVersionId:string,user:any){
+  const {data,error}=await this.supabase.schema('documents').from('document_versions').select('id,filename,storage_bucket,storage_path').eq('id',documentVersionId).eq('company_id',user.companyId).maybeSingle();
+  if(error)throw new BadRequestException(error.message);
+  if(!data)throw new NotFoundException('Document not found');
+  const {data:url,error:urlError}=await this.supabase.client.storage.from(data.storage_bucket).createSignedUrl(data.storage_path,600);
+  if(urlError)throw new BadRequestException(urlError.message);
+  const {error:auditError}=await this.supabase.rpc('platform','write_audit',{p_company_id:user.companyId,p_actor_id:user.id,p_action:'DOCUMENT_VIEWED',p_entity_type:'DOCUMENT_VERSION',p_entity_id:data.id,p_old_value:null,p_new_value:{filename:data.filename},p_reason:null,p_source:'API'});
+  if(auditError)throw new BadRequestException(`Audit logging failed: ${auditError.message}`);
+  return {documentVersionId:data.id,filename:data.filename,url:url?.signedUrl,expiresIn:600};
  }
  private async resolveSkuItems(extracted:any, user?:any){
   if(!user?.companyId || !extracted.lines?.length) return extracted;

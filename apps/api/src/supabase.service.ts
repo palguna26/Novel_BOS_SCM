@@ -76,8 +76,8 @@ export class SupabaseService {
       role: profile.role,
       companyId: access.company_id,
       canRead: access.can_read,
-      canWrite: access.can_write,
-      canApprove: access.can_approve,
+      canWrite: access.can_write || profile.role === 'SUPER_ADMIN',
+      canApprove: access.can_approve || profile.role === 'SUPER_ADMIN',
     };
   }
 }

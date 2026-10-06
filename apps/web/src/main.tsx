@@ -262,8 +262,10 @@ function App() {
       });
       setToast("Saved successfully");
       refresh();
+      return true;
     } catch (e: any) {
       setToast(e.message);
+      return false;
     }
   };
   return (
@@ -833,9 +835,9 @@ function ReviewUploadForm({
       return;
     }
     setBusy(true);
-    await onAction("/api/pos", body);
+    const saved = await onAction("/api/pos", body);
     setBusy(false);
-    onClose();
+    if (saved) onClose();
   };
   return (
     <div className="fixed inset-0 bg-black/40 z-20 flex items-center justify-center p-8">

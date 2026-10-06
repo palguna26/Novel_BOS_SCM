@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Headers, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Req, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard } from './auth';
 import { DocumentService } from './document.service';
@@ -16,5 +16,10 @@ export class DocumentController {
     if (!file) throw new BadRequestException('File is required.');
     const result = await this.docs.saveAndExtract(file.originalname, file.buffer, req.user, key, file.mimetype, extractedText);
     return { ...result, userId: req.user.id };
+  }
+
+  @Get(':id/url')
+  signedUrl(@Param('id') id: string, @Req() req: any) {
+    return this.docs.signedUrl(id, req.user);
   }
 }

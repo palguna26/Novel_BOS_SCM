@@ -30,6 +30,21 @@ export class AppService {
     return this.result(data, error);
   }
 
+  private async auditMutation(user: AuthenticatedUser, action: string, entityType: string, entityId: string, oldValue: any, newValue: any, reason?: string) {
+    const { error } = await this.sb.rpc('platform', 'write_audit', {
+      p_company_id: user.companyId,
+      p_actor_id: user.id,
+      p_action: action,
+      p_entity_type: entityType,
+      p_entity_id: entityId,
+      p_old_value: oldValue || null,
+      p_new_value: newValue || null,
+      p_reason: reason || null,
+      p_source: 'API',
+    });
+    if (error) throw new BadRequestException(`Audit logging failed: ${error.message}`);
+  }
+
   private async rows(schema: string, table: string, companyId: string, order?: string) {
     let query = this.sb.schema(schema).from(table).select('*').eq('company_id', companyId);
     if (order) query = query.order(order, { ascending: false });
@@ -180,8 +195,13 @@ export class AppService {
     this.approve(user);
     const payload = Object.fromEntries(fields.filter(field => body[field] !== undefined).map(field => [field, body[field]]));
     if (!Object.keys(payload).length) throw new BadRequestException('No changes supplied');
+    const { data: oldValue, error: oldError } = await this.sb.schema(schema).from(table).select('*').eq('id', id).eq('company_id', user.companyId).maybeSingle();
+    if (oldError) throw new BadRequestException(oldError.message);
+    if (!oldValue) throw new BadRequestException('Record not found');
     const { data, error } = await this.sb.schema(schema).from(table).update(payload).eq('id', id).eq('company_id', user.companyId).select().single();
-    return this.result(data, error);
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'MASTER_DATA_UPDATED', `${schema}.${table}`, id, oldValue, result);
+    return result;
   }
 
   async auditLog(user: AuthenticatedUser) {
@@ -205,13 +225,17 @@ export class AppService {
     const uomId = body.uomId || (await this.sb.schema('master_data').from('uoms').select('id').eq('active', true).limit(1).single()).data?.id;
     if (!body.code || !body.name || !uomId) throw new BadRequestException('Code, name and a UOM are required');
     const { data, error } = await this.sb.schema('master_data').from('items').insert({ company_id: user.companyId, code: body.code, name: body.name, item_class: body.itemClass || 'FG', base_uom_id: uomId, lifecycle_status: 'DRAFT' }).select().single();
-    return this.result(data, error);
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'SKU_CREATED', 'MASTER_DATA_ITEM', result.id, null, result);
+    return result;
   }
 
   async createWarehouse(user: AuthenticatedUser, body: Row) {
     this.approve(user);
     const { data, error } = await this.sb.schema('master_data').from('sites').insert({ company_id: user.companyId, code: body.code, name: body.name, city: body.city, state: body.state, site_type: 'WAREHOUSE' }).select().single();
-    return this.result(data, error);
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'WAREHOUSE_CREATED', 'MASTER_DATA_SITE', result.id, null, result);
+    return result;
   }
 
   async updateSku(user: AuthenticatedUser, id: string, body: Row) {
@@ -226,7 +250,9 @@ export class AppService {
     this.approve(user);
     if (!body.warehouseId || !body.code || !body.name || !body.locationType) throw new BadRequestException('Warehouse, code, name and location type are required');
     const { data, error } = await this.sb.schema('master_data').from('locations').insert({ company_id: user.companyId, site_id: body.warehouseId, code: body.code, name: body.name, location_type: body.locationType, barcode: body.barcode || null, virtual: Boolean(body.virtual) }).select().single();
-    return this.result(data, error);
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'LOCATION_CREATED', 'MASTER_DATA_LOCATION', result.id, null, result);
+    return result;
   }
 
   async updateLocation(user: AuthenticatedUser, id: string, body: Row) {
@@ -238,11 +264,15 @@ export class AppService {
     if (body.mappingType === 'CHANNEL_SKU') {
       if (!body.skuId || !body.channelId || !body.value) throw new BadRequestException('Channel, SKU and external code are required');
       const { data, error } = await this.sb.schema('master_data').from('item_identifiers').insert({ company_id: user.companyId, item_id: body.skuId, channel_id: body.channelId, identifier_type: 'CHANNEL_SKU', value: body.value }).select().single();
-      return this.result(data, error);
+      const result = this.result(data, error);
+      await this.auditMutation(user, 'CHANNEL_SKU_MAPPING_CREATED', 'MASTER_DATA_ITEM_IDENTIFIER', result.id, null, result);
+      return result;
     }
     if (!body.channelId || !body.destinationKey || !body.destinationName || !body.warehouseId || !body.locationId) throw new BadRequestException('Channel, destination, warehouse and location are required');
     const { data, error } = await this.sb.schema('master_data').from('destination_mappings').insert({ company_id: user.companyId, channel_id: body.channelId, destination_key: body.destinationKey, destination_name: body.destinationName, fc_code: body.fcCode || null, source_site_id: body.warehouseId, source_location_id: body.locationId }).select().single();
-    return this.result(data, error);
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'DESTINATION_MAPPING_CREATED', 'MASTER_DATA_DESTINATION_MAPPING', result.id, null, result);
+    return result;
   }
 
   async updateMapping(user: AuthenticatedUser, id: string, body: Row) {
@@ -255,7 +285,9 @@ export class AppService {
     this.approve(user);
     if (!body.warehouseId || !body.destinationKey || Number(body.transitHours) <= 0) throw new BadRequestException('Warehouse, destination and transit hours are required');
     const { data, error } = await this.sb.schema('master_data').from('routes').insert({ company_id: user.companyId, source_site_id: body.warehouseId, destination_key: body.destinationKey, transit_hours: Number(body.transitHours), estimated_cost: Number(body.estimatedCost || 0), currency: body.currency || 'INR' }).select().single();
-    return this.result(data, error);
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'ROUTE_CREATED', 'MASTER_DATA_ROUTE', result.id, null, result);
+    return result;
   }
 
   async updateRoute(user: AuthenticatedUser, id: string, body: Row) {
@@ -266,14 +298,21 @@ export class AppService {
     this.approve(user);
     if (!body.code || !body.name || !body.dimension) throw new BadRequestException('Code, name and dimension are required');
     const { data, error } = await this.sb.schema('master_data').from('uoms').insert({ code: body.code, name: body.name, dimension: body.dimension, decimal_places: Number(body.decimalPlaces || 3) }).select().single();
-    return this.result(data, error);
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'UOM_CREATED', 'MASTER_DATA_UOM', result.id, null, result);
+    return result;
   }
 
   async updateUom(user: AuthenticatedUser, id: string, body: Row) {
     this.approve(user);
     const payload = Object.fromEntries(['code', 'name', 'dimension', 'decimal_places', 'active'].filter(field => body[field] !== undefined).map(field => [field, body[field]]));
+    const { data: oldValue, error: oldError } = await this.sb.schema('master_data').from('uoms').select('*').eq('id', id).maybeSingle();
+    if (oldError) throw new BadRequestException(oldError.message);
+    if (!oldValue) throw new BadRequestException('UOM not found');
     const { data, error } = await this.sb.schema('master_data').from('uoms').update(payload).eq('id', id).select().single();
-    return this.result(data, error);
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'UOM_UPDATED', 'MASTER_DATA_UOM', id, oldValue, result);
+    return result;
   }
 
   async addStock(user: AuthenticatedUser, body: Row, idempotencyKey?: string) {
