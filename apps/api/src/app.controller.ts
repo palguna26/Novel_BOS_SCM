@@ -11,10 +11,21 @@ export class AppController {
   @Get('pos') pos(@Req() req: any) { return this.service.listPos(req.user); }
   @Get('masters') masters(@Req() req: any) { return this.service.masters(req.user); }
   @Get('inventory') inventory(@Req() req: any) { return this.service.inventory(req.user); }
+  @Get('inventory/transactions') inventoryTransactions(@Req() req: any) { return this.service.inventoryTransactions(req.user); }
   @Get('audit') audit(@Req() req: any) { return this.service.auditLog(req.user); }
 
   @Post('skus') sku(@Req() req: any, @Body() body: any) { return this.service.createSku(req.user, body); }
+  @Post('skus/:id') updateSku(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateSku(req.user, id, body); }
   @Post('warehouses') warehouse(@Req() req: any, @Body() body: any) { return this.service.createWarehouse(req.user, body); }
+  @Post('warehouses/:id') updateWarehouse(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateWarehouse(req.user, id, body); }
+  @Post('locations') location(@Req() req: any, @Body() body: any) { return this.service.createLocation(req.user, body); }
+  @Post('locations/:id') updateLocation(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateLocation(req.user, id, body); }
+  @Post('mappings') mapping(@Req() req: any, @Body() body: any) { return this.service.createMapping(req.user, body); }
+  @Post('mappings/:id') updateMapping(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateMapping(req.user, id, body); }
+  @Post('routes') route(@Req() req: any, @Body() body: any) { return this.service.createRoute(req.user, body); }
+  @Post('routes/:id') updateRoute(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateRoute(req.user, id, body); }
+  @Post('uoms') uom(@Req() req: any, @Body() body: any) { return this.service.createUom(req.user, body); }
+  @Post('uoms/:id') updateUom(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateUom(req.user, id, body); }
   @Post('inventory/add') add(@Req() req: any, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.addStock(req.user, body, key); }
   @Post('pos') createPo(@Req() req: any, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.createPo(req.user, body, key); }
   @Post('pos/:id/accept') accept(@Req() req: any, @Param('id') id: string, @Headers('idempotency-key') key?: string) { return this.service.acceptPo(req.user, id, key); }

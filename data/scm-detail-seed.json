@@ -1,0 +1,113 @@
+{
+  "sourceFiles": [
+    "SCM Detail/Copy of DISPATCH PO's.xlsx",
+    "SCM Detail/4S2BJXYY - PO.pdf",
+    "SCM Detail/FLSCNISD6QGPBUQE_consignment_details.pdf",
+    "SCM Detail/FLSCNISD6F7Y6K7P_consignment_details.pdf",
+    "SCM Detail/FLSCNISD6VAWS0A5_consignment_details.pdf",
+    "SCM Detail/49990010116382.pdf",
+    "SCM Detail/49990010116382.xlsx",
+    "SCM Detail/purchase_order_FLS02CDDC93B (1).xlsx"
+  ],
+  "sourceNotes": [
+    "The source files do not provide one consistent internal warehouse-code system. The seed keeps the source operations labels Mysore and Manesar as the warehouse codes instead of inventing MYS-WH or MAN-WH.",
+    "NT- prefixed SKU codes are test internal codes derived from source EANs. The original EAN, ASIN, Flipkart product ID, or Blinkit item code is retained as an identifier.",
+    "The source provides transit days for the selected routes. Transit hours are converted using 24 hours per day.",
+    "Estimated route costs were not present in the source files and are seeded as zero. Replace them when confirmed."
+  ],
+  "uoms": [
+    { "code": "EA", "name": "Each", "dimension": "COUNT", "decimal_places": 0 }
+  ],
+  "warehouses": [
+    { "code": "Mysore", "name": "Mysore", "site_type": "WAREHOUSE", "city": "Mysuru", "state": "KA", "sourceReference": "Dispatch PO sheet: Dispatch FC = Mysore" },
+    { "code": "Manesar", "name": "Manesar", "site_type": "WAREHOUSE", "city": "Manesar", "state": "HR", "sourceReference": "Dispatch PO sheet: Dispatch FC = Manesar" }
+  ],
+  "locations": [
+    { "warehouseCode": "Mysore", "code": "MYS-STOCK", "name": "Mysuru Main Stock", "location_type": "WAREHOUSE" },
+    { "warehouseCode": "Manesar", "code": "MAN-STOCK", "name": "Manesar Main Stock", "location_type": "WAREHOUSE" }
+  ],
+  "channels": [
+    { "code": "AMZ", "name": "Amazon / RK World", "channel_type": "MARKETPLACE", "ingestion_method": "FILE" },
+    { "code": "FLIP", "name": "Flipkart", "channel_type": "MARKETPLACE", "ingestion_method": "FILE" },
+    { "code": "BLINK", "name": "Blinkit", "channel_type": "QUICK_COMMERCE", "ingestion_method": "FILE" }
+  ],
+  "items": [
+    { "code": "NT-8906006351271", "name": "Novel Goat Milk Baby Wipes 72s Pack of 6", "item_class": "FG", "source": "EAN 8906006351271" },
+    { "code": "NT-8906006350595", "name": "Novel Baby Wipes 80 Sheets Pack of 6 with Lid", "item_class": "FG", "source": "EAN 8906006350595" },
+    { "code": "NT-8906006350601", "name": "Novel Baby Wipes 80 Sheets Pack of 5 with Lid", "item_class": "FG", "source": "EAN 8906006350601" },
+    { "code": "NT-8906006350977", "name": "Novel Baby Wipes 72 Sheets Pack", "item_class": "FG", "source": "EAN 8906006350977" },
+    { "code": "NT-8906006350687", "name": "Babio Baby Pants Diaper Small 56 Pieces Pack of 6", "item_class": "FG", "source": "EAN 8906006350687" },
+    { "code": "NT-10270206", "name": "Babio Alcohol-Free Baby Wipes 72 Wipes", "item_class": "FG", "source": "Blinkit Item Code 10270206" },
+    { "code": "NT-10270581", "name": "Babio Wet Baby Wipes 144 Wipes", "item_class": "FG", "source": "Blinkit Item Code 10270581" },
+    { "code": "NT-10270624", "name": "Babio Novel Baby Wipes with Lid 216 Wipes", "item_class": "FG", "source": "Blinkit Item Code 10270624" }
+  ],
+  "identifiers": [
+    { "itemCode": "NT-8906006351271", "channelCode": "FLIP", "identifier_type": "CHANNEL_SKU", "value": "WIPGWVCM4YYGARYY" },
+    { "itemCode": "NT-8906006351271", "channelCode": "AMZ", "identifier_type": "CHANNEL_SKU", "value": "B0CZTQBG78" },
+    { "itemCode": "NT-8906006351271", "identifier_type": "EAN", "value": "8906006351271" },
+    { "itemCode": "NT-8906006350595", "channelCode": "FLIP", "identifier_type": "CHANNEL_SKU", "value": "WIPFX7S7HQNZUUYU" },
+    { "itemCode": "NT-8906006350595", "identifier_type": "EAN", "value": "8906006350595" },
+    { "itemCode": "NT-8906006350601", "channelCode": "FLIP", "identifier_type": "CHANNEL_SKU", "value": "WIPFX7S3MVZYPXDV" },
+    { "itemCode": "NT-8906006350601", "identifier_type": "EAN", "value": "8906006350601" },
+    { "itemCode": "NT-8906006350977", "channelCode": "FLIP", "identifier_type": "CHANNEL_SKU", "value": "WIPFJV4RRV2HNTYF" },
+    { "itemCode": "NT-8906006350977", "identifier_type": "EAN", "value": "8906006350977" },
+    { "itemCode": "NT-8906006350687", "channelCode": "AMZ", "identifier_type": "CHANNEL_SKU", "value": "B0D7HMWLQW" },
+    { "itemCode": "NT-8906006350687", "identifier_type": "EAN", "value": "8906006350687" },
+    { "itemCode": "NT-10270206", "channelCode": "BLINK", "identifier_type": "CHANNEL_SKU", "value": "10270206" },
+    { "itemCode": "NT-10270206", "identifier_type": "UPC", "value": "8906006350847" },
+    { "itemCode": "NT-10270581", "channelCode": "BLINK", "identifier_type": "CHANNEL_SKU", "value": "10270581" },
+    { "itemCode": "NT-10270581", "identifier_type": "UPC", "value": "8906006351905" },
+    { "itemCode": "NT-10270624", "channelCode": "BLINK", "identifier_type": "CHANNEL_SKU", "value": "10270624" },
+    { "itemCode": "NT-10270624", "identifier_type": "UPC", "value": "8906006351363" }
+  ],
+  "destinationMappings": [
+    { "channelCode": "AMZ", "destinationKey": "BLR4", "destinationName": "BLR4 - Bengaluru", "fcCode": "BLR4", "warehouseCode": "Mysore", "locationCode": "MYS-STOCK" },
+    { "channelCode": "FLIP", "destinationKey": "ANJ_BTS_01", "destinationName": "ANJ_BTS_01", "fcCode": "ban_ven_wh_nl_01nl", "warehouseCode": "Mysore", "locationCode": "MYS-STOCK" },
+    { "channelCode": "FLIP", "destinationKey": "Farrukhnagar BTS Warehouse", "destinationName": "Farrukhnagar BTS Warehouse", "fcCode": "DED5", "warehouseCode": "Manesar", "locationCode": "MAN-STOCK" },
+    { "channelCode": "FLIP", "destinationKey": "Anekal Grocery_NL HL Sourcing Hub", "destinationName": "Anekal Grocery_NL HL Sourcing Hub", "fcCode": "ane_gsh_wh_nl_01nl", "warehouseCode": "Mysore", "locationCode": "MYS-STOCK" },
+    { "channelCode": "BLINK", "destinationKey": "BCPL - Bengaluru B5 Feeder Warehouse", "destinationName": "BCPL - Bengaluru B5 Feeder Warehouse", "fcCode": null, "warehouseCode": "Mysore", "locationCode": "MYS-STOCK" }
+  ],
+  "routes": [
+    { "warehouseCode": "Mysore", "destinationKey": "BLR4", "transitHours": 24, "estimatedCost": 0, "sourceTransitDays": 1 },
+    { "warehouseCode": "Mysore", "destinationKey": "ANJ_BTS_01", "transitHours": 24, "estimatedCost": 0, "sourceTransitDays": 1 },
+    { "warehouseCode": "Manesar", "destinationKey": "Farrukhnagar BTS Warehouse", "transitHours": 24, "estimatedCost": 0, "sourceTransitDays": 1 },
+    { "warehouseCode": "Mysore", "destinationKey": "Anekal Grocery_NL HL Sourcing Hub", "transitHours": 24, "estimatedCost": 0, "sourceTransitDays": 1 }
+  ],
+  "openingStock": [
+    { "warehouseCode": "Mysore", "quantity": 100 },
+    { "warehouseCode": "Manesar", "quantity": 100 }
+  ],
+  "purchaseOrders": [
+    {
+      "channelCode": "AMZ",
+      "externalId": "4S2BJXYY",
+      "poDate": "2026-09-09T00:00:00Z",
+      "deadline": "2026-10-02T23:59:00Z",
+      "destinationKey": "BLR4",
+      "destinationName": "BLR4 - Bengaluru",
+      "customer": "RK WORLDINFOCOM PRIVATE LIMITED",
+      "warehouseCode": "Mysore",
+      "totalValue": 35004.2,
+      "sourceFile": "SCM Detail/4S2BJXYY - PO.pdf",
+      "lines": [
+        { "itemCode": "NT-8906006350687", "channelItemCode": "B0D7HMWLQW", "description": "Babio Baby Pants Diaper Small 56 Pieces Pack of 6", "ordered": 121, "unitPrice": 271.7 },
+        { "itemCode": "NT-8906006351271", "channelItemCode": "B0CZTQBG78", "description": "Novel Goat Milk Baby Wipes 72 Wipes x Pack of 6", "ordered": 10, "unitPrice": 212.95 }
+      ]
+    },
+    {
+      "channelCode": "FLIP",
+      "externalId": "FLS02CDDC93B",
+      "poDate": "2026-08-24T00:00:00Z",
+      "deadline": "2026-10-03T23:59:00Z",
+      "destinationKey": "Farrukhnagar BTS Warehouse",
+      "destinationName": "Farrukhnagar BTS Warehouse",
+      "customer": "FLIPKART INDIA PRIVATE LIMITED",
+      "warehouseCode": "Manesar",
+      "totalValue": 11394.96,
+      "sourceFile": "SCM Detail/purchase_order_FLS02CDDC93B (1).xlsx",
+      "lines": [
+        { "itemCode": "NT-8906006351271", "channelItemCode": "WIPGWVCM4YYGARYY", "description": "NOVEL Goat Milk Baby Wipes 72s Sheet Pack Of 6", "ordered": 24, "unitPrice": 474.79, "taxRate": 18 }
+      ]
+    }
+  ]
+}

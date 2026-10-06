@@ -131,16 +131,17 @@ export class AppService {
 
   async masters(user: AuthenticatedUser) {
     const companyId = user.companyId;
-    const [platforms, warehouses, skus, mappings, routes, locations, uoms] = await Promise.all([
+    const [platforms, warehouses, skus, mappings, itemIdentifiers, routes, locations, uoms] = await Promise.all([
       this.rows('master_data', 'channels', companyId),
       this.rows('master_data', 'sites', companyId),
       this.rows('master_data', 'items', companyId),
       this.rows('master_data', 'destination_mappings', companyId),
+      this.rows('master_data', 'item_identifiers', companyId),
       this.rows('master_data', 'routes', companyId),
       this.rows('master_data', 'locations', companyId),
       this.sb.schema('master_data').from('uoms').select('*').eq('active', true),
     ]);
-    return { platforms, warehouses, skus, mappings, routes, locations, uoms: this.result(uoms.data, uoms.error) || [] };
+    return { platforms, warehouses, skus, mappings, itemIdentifiers, routes, locations, uoms: this.result(uoms.data, uoms.error) || [] };
   }
 
   async inventory(user: AuthenticatedUser) {
@@ -162,6 +163,25 @@ export class AppService {
       sku: items.find(x => x.id === row.item_id),
       warehouse: sites.find(x => x.id === row.site_id),
     }));
+  }
+
+  async inventoryTransactions(user: AuthenticatedUser) {
+    const [transactions, entries] = await Promise.all([
+      this.rows('inventory', 'stock_transactions', user.companyId, 'created_at'),
+      this.rows('inventory', 'stock_ledger_entries', user.companyId),
+    ]);
+    return transactions.slice(0, 200).map(transaction => ({
+      ...transaction,
+      entries: entries.filter(entry => entry.stock_transaction_id === transaction.id),
+    }));
+  }
+
+  private async updateCompanyRow(user: AuthenticatedUser, schema: string, table: string, id: string, body: Row, fields: string[]) {
+    this.approve(user);
+    const payload = Object.fromEntries(fields.filter(field => body[field] !== undefined).map(field => [field, body[field]]));
+    if (!Object.keys(payload).length) throw new BadRequestException('No changes supplied');
+    const { data, error } = await this.sb.schema(schema).from(table).update(payload).eq('id', id).eq('company_id', user.companyId).select().single();
+    return this.result(data, error);
   }
 
   async auditLog(user: AuthenticatedUser) {
@@ -191,6 +211,68 @@ export class AppService {
   async createWarehouse(user: AuthenticatedUser, body: Row) {
     this.approve(user);
     const { data, error } = await this.sb.schema('master_data').from('sites').insert({ company_id: user.companyId, code: body.code, name: body.name, city: body.city, state: body.state, site_type: 'WAREHOUSE' }).select().single();
+    return this.result(data, error);
+  }
+
+  async updateSku(user: AuthenticatedUser, id: string, body: Row) {
+    return this.updateCompanyRow(user, 'master_data', 'items', id, body, ['code', 'name', 'item_class', 'brand', 'category', 'variant', 'base_uom_id', 'lifecycle_status', 'active_from', 'active_to']);
+  }
+
+  async updateWarehouse(user: AuthenticatedUser, id: string, body: Row) {
+    return this.updateCompanyRow(user, 'master_data', 'sites', id, body, ['code', 'name', 'city', 'state', 'active']);
+  }
+
+  async createLocation(user: AuthenticatedUser, body: Row) {
+    this.approve(user);
+    if (!body.warehouseId || !body.code || !body.name || !body.locationType) throw new BadRequestException('Warehouse, code, name and location type are required');
+    const { data, error } = await this.sb.schema('master_data').from('locations').insert({ company_id: user.companyId, site_id: body.warehouseId, code: body.code, name: body.name, location_type: body.locationType, barcode: body.barcode || null, virtual: Boolean(body.virtual) }).select().single();
+    return this.result(data, error);
+  }
+
+  async updateLocation(user: AuthenticatedUser, id: string, body: Row) {
+    return this.updateCompanyRow(user, 'master_data', 'locations', id, body, ['code', 'name', 'location_type', 'barcode', 'active']);
+  }
+
+  async createMapping(user: AuthenticatedUser, body: Row) {
+    this.approve(user);
+    if (body.mappingType === 'CHANNEL_SKU') {
+      if (!body.skuId || !body.channelId || !body.value) throw new BadRequestException('Channel, SKU and external code are required');
+      const { data, error } = await this.sb.schema('master_data').from('item_identifiers').insert({ company_id: user.companyId, item_id: body.skuId, channel_id: body.channelId, identifier_type: 'CHANNEL_SKU', value: body.value }).select().single();
+      return this.result(data, error);
+    }
+    if (!body.channelId || !body.destinationKey || !body.destinationName || !body.warehouseId || !body.locationId) throw new BadRequestException('Channel, destination, warehouse and location are required');
+    const { data, error } = await this.sb.schema('master_data').from('destination_mappings').insert({ company_id: user.companyId, channel_id: body.channelId, destination_key: body.destinationKey, destination_name: body.destinationName, fc_code: body.fcCode || null, source_site_id: body.warehouseId, source_location_id: body.locationId }).select().single();
+    return this.result(data, error);
+  }
+
+  async updateMapping(user: AuthenticatedUser, id: string, body: Row) {
+    const table = body.mappingType === 'CHANNEL_SKU' ? 'item_identifiers' : 'destination_mappings';
+    const fields = body.mappingType === 'CHANNEL_SKU' ? ['value', 'active'] : ['destination_key', 'destination_name', 'fc_code', 'source_site_id', 'source_location_id', 'active'];
+    return this.updateCompanyRow(user, 'master_data', table, id, body, fields);
+  }
+
+  async createRoute(user: AuthenticatedUser, body: Row) {
+    this.approve(user);
+    if (!body.warehouseId || !body.destinationKey || Number(body.transitHours) <= 0) throw new BadRequestException('Warehouse, destination and transit hours are required');
+    const { data, error } = await this.sb.schema('master_data').from('routes').insert({ company_id: user.companyId, source_site_id: body.warehouseId, destination_key: body.destinationKey, transit_hours: Number(body.transitHours), estimated_cost: Number(body.estimatedCost || 0), currency: body.currency || 'INR' }).select().single();
+    return this.result(data, error);
+  }
+
+  async updateRoute(user: AuthenticatedUser, id: string, body: Row) {
+    return this.updateCompanyRow(user, 'master_data', 'routes', id, body, ['destination_key', 'transit_hours', 'estimated_cost', 'currency', 'active']);
+  }
+
+  async createUom(user: AuthenticatedUser, body: Row) {
+    this.approve(user);
+    if (!body.code || !body.name || !body.dimension) throw new BadRequestException('Code, name and dimension are required');
+    const { data, error } = await this.sb.schema('master_data').from('uoms').insert({ code: body.code, name: body.name, dimension: body.dimension, decimal_places: Number(body.decimalPlaces || 3) }).select().single();
+    return this.result(data, error);
+  }
+
+  async updateUom(user: AuthenticatedUser, id: string, body: Row) {
+    this.approve(user);
+    const payload = Object.fromEntries(['code', 'name', 'dimension', 'decimal_places', 'active'].filter(field => body[field] !== undefined).map(field => [field, body[field]]));
+    const { data, error } = await this.sb.schema('master_data').from('uoms').update(payload).eq('id', id).select().single();
     return this.result(data, error);
   }
 

@@ -1,5 +1,7 @@
 # SCM Business Operating System
 
+[Read the user guide](USER-GUIDE.md) for page explanations, data-entry instructions, and the full PO-to-invoice workflow.
+
 This workspace contains the namespaced SCM v2 workflow from the PRD. It uses React/Vite/Tailwind in `apps/web`, NestJS in `apps/api`, and Supabase for PostgreSQL data and authentication.
 
 ## Local startup
@@ -12,11 +14,15 @@ This workspace contains the namespaced SCM v2 workflow from the PRD. It uses Rea
 6. Seed v2 demo data: `pnpm supabase:seed`.
 7. Start both apps: `pnpm dev`.
 
+To load the real-file-derived SCM Detail test data after applying the migrations, run `npm --prefix apps/api run seed:scm-detail`. This creates the normalized warehouse, location, channel, SKU, channel-identifier, destination-mapping, route, opening-stock, and sample PO records described in [`data/scm-detail-seed.json`](data/scm-detail-seed.json). The script is idempotent for the seeded records.
+
 If pnpm cannot access its global store on Windows, run the seed directly with `npm --prefix apps/api run seed`.
 
 Open `http://localhost:5173`. Demo accounts use password `demo123`: `admin@scm.local`, `manager@scm.local`, `team@scm.local`, and `qc@scm.local`.
 
-The API exposes document extraction at `POST /api/documents/extract`. PDF files are stored under `storage/documents`, normalized for Amazon/RK World, Flipkart, and Blinkit, and registered as versioned v2 documents. The UI supports PO review, independent acceptance and appointment gates, reservation, shipment planning and dispatch, POD confirmation, short close, and invoice upload.
+The API exposes document extraction at `POST /api/documents/extract`. PDF, XLSX, CSV, and DOCX files up to 10 MB are stored under `storage/documents`, normalized for Amazon/RK World, Flipkart, and Blinkit, and registered as versioned v2 documents. The UI supports these formats for PO, appointment, POD, and invoice uploads, plus PO review, independent acceptance and appointment gates, reservation, shipment planning and dispatch, short close, and invoice processing.
+
+Document extraction uses OpenRouter first when `OPENROUTER_API_KEY` is configured. The default model is `openai/gpt-4o-mini`; override it with `OPENROUTER_MODEL`. Requests enforce structured output, zero-data-retention routing, and denied provider data collection. If OpenRouter is unavailable or returns invalid data, the API falls back to the deterministic normalizer and flags weak results for review.
 
 ## Validation
 

@@ -29,12 +29,19 @@ export class SupabaseService {
   }
 
   async signInWithPassword(email: string, password: string) {
-    const authClient = createClient(
+    return this.authClient().auth.signInWithPassword({ email, password });
+  }
+
+  async refreshSession(refreshToken: string) {
+    return this.authClient().auth.refreshSession({ refresh_token: refreshToken });
+  }
+
+  private authClient() {
+    return createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_ANON_KEY!,
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
-    return authClient.auth.signInWithPassword({ email, password });
   }
 
   async rpc<T = unknown>(schema: string, name: string, args: Record<string, unknown>) {

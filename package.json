@@ -1,0 +1,14 @@
+{
+  "name": "scm-mvp",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --parallel --filter @scm/api --filter @scm/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "supabase:seed": "pnpm --filter @scm/api seed"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "devDependencies": {
+    "supabase": "^2.119.0"
+  }
+}

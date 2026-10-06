@@ -1,0 +1,7 @@
+node_modules/
+dist/
+apps/*/dist/
+apps/*/storage/
+.env
+apps/*/.env
+*.tsbuildinfo
