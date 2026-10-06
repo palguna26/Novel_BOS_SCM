@@ -4,7 +4,7 @@ import { normalizeDocument } from './document-extractor';
 import { SupabaseService } from './supabase.service';
 import { ExtractionMetadata, OpenRouterExtractor } from './openrouter-extractor';
 import { resolveSkuLines } from './sku-resolver';
-export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,mediaType?:string,scope?:string):Promise<string>; }
+export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,mediaType?:string,scope?:string):Promise<string>; remove(name:string):Promise<void>; }
 @Injectable() export class SupabaseDocumentStorage implements DocumentStorage {
  bucket=process.env.DOCUMENT_STORAGE_BUCKET||'scm-documents';
  constructor(private readonly supabase:SupabaseService){}
@@ -14,6 +14,10 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
   const {error}=await this.supabase.client.storage.from(this.bucket).upload(objectPath,data,{contentType:mediaType,upsert:false});
   if(error)throw new BadRequestException(`Document storage failed: ${error.message}`);
   return objectPath;
+ }
+ async remove(objectPath:string){
+  const {error}=await this.supabase.client.storage.from(this.bucket).remove([objectPath]);
+  if(error) throw new BadRequestException(`Document cleanup failed: ${error.message}`);
  }
 }
 @Injectable() export class DocumentService {
@@ -28,7 +32,7 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
   extracted = await this.resolveSkuItems(extracted, user);
   const sha256=this.hash(data);
   let registration:any=null;
-  if(user?.companyId){const {data:registered,error}=await this.supabase.rpc<any>('documents','register_extraction',{p_payload:{companyId:user.companyId,documentType:extracted.kind,businessKey:extracted.externalId||extracted.appointmentId,filename:name,storageBucket:this.storage.bucket,storagePath:file,mediaType,byteSize:data.length,sha256,confidence:extracted.confidence,extracted:{...extracted,_extraction:extraction}},p_actor_id:user.id,p_idempotency_key:idempotencyKey||crypto.randomUUID()});if(error)throw new Error(error.message);registration=registered;}
+  if(user?.companyId){const {data:registered,error}=await this.supabase.rpc<any>('documents','register_extraction',{p_payload:{companyId:user.companyId,documentType:extracted.kind,businessKey:extracted.externalId||extracted.appointmentId,filename:name,storageBucket:this.storage.bucket,storagePath:file,mediaType,byteSize:data.length,sha256,confidence:extracted.confidence,extracted:{...extracted,_extraction:extraction}},p_actor_id:user.id,p_idempotency_key:idempotencyKey||crypto.randomUUID()});if(error){await this.storage.remove(file).catch(()=>undefined);throw new Error(error.message);}registration=registered;if(registered?.duplicate){await this.storage.remove(file).catch(()=>undefined);}}
   return {file,filename:name,sha256,extracted,confidence:extracted.confidence,warnings:extracted.warnings,extraction,...registration};
  }
  async signedUrl(documentVersionId:string,user:any){
