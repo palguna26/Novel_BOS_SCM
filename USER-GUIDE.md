@@ -1,383 +1,312 @@
 # Novel SCM User Guide
 
-This guide explains how to use the Novel SCM operations workspace. It covers the main pages, the data entered on each page, and the normal purchase-order journey from upload to invoice.
+## 1. End-to-end PO operation
 
-## 1. What the system does
-
-Novel SCM keeps one record for each purchase order (PO). It connects:
-
-- Purchase orders and their product lines
-- Marketplace or channel information
-- Warehouses and stock
-- Delivery appointments
-- Shipments and trucks
-- Proof of delivery (POD)
-- External invoices
-- Audit history
-
-The basic flow is:
+Use this order for a normal PO:
 
 ```text
-Upload PO -> Review PO -> Accept PO -> Book appointment -> Plan shipment
--> Dispatch -> Confirm POD -> Upload invoice -> Close
+Sign in
+-> Upload PO
+-> Review extracted PO data
+-> Save the PO
+-> Check SKU and destination mappings
+-> Accept or reject the PO
+-> Attach the appointment document
+-> Wait for both acceptance and appointment gates
+-> Reserve stock
+-> Manually plan one or more shipments
+-> Dispatch each shipment
+-> Upload POD and enter actual received quantities
+-> Short close any approved remainder, if needed
+-> Upload the invoice
+-> Check Audit Log
 ```
 
-The system protects stock during this flow. Accepted PO quantities are blocked, dispatched quantities become in transit, and delivered quantities leave company stock only after POD confirmation.
+Acceptance and appointment can be completed in either order. Stock is reserved only after both are complete.
 
-## 2. Sign in
+Shipment planning is manual. The system does not decide that all remaining PO quantity belongs on one truck. For example, a PO with A, B, C, and D can be planned as:
+
+```text
+Shipment 1: 75% of A
+Shipment 2: remaining 25% of A + B + C + D
+```
+
+## 2. Sign in and shared page controls
 
 1. Open the SCM web address.
 2. Enter your work email.
 3. Enter your password.
 4. Select **Sign in**.
 
-Your access depends on your role. QC users are normally view-only. SCM team members, managers, and administrators can have different action permissions.
+After sign-in, the left navigation shows **Overview**, **PO Inbox**, **Inventory**, **Shipments**, **Appointments**, **Invoices**, **Administration**, and **Audit Log**.
 
-Use **Sign out** at the bottom of the left menu when finished.
+The top bar shows the current page, a search field, and your user avatar. The bottom of the navigation shows your name, role, and **Sign out**.
 
-## 3. Overview page
+Your role controls what you can change. QC users are normally view-only. Manager and administrator permissions are needed for approval and controlled master-data actions.
 
-The Overview page is the daily starting point. It shows:
+## 3. Overview
 
-- **Awaiting review**: POs that need checking
-- **Inventory blocked**: accepted POs holding stock
-- **In transit**: shipments that are moving
-- **Awaiting invoice**: delivered POs ready for invoice upload
-- **Recent purchase orders**: the latest PO activity
-- **Warehouse pulse**: available stock by warehouse and SKU
+The Overview page is the daily starting page.
 
-Select **Upload purchase order** to start a new PO.
+### Page elements
+
+- **Upload purchase order**: opens PO document intake.
+- **Awaiting review**: count of POs needing review.
+- **Inventory blocked**: accepted PO activity holding stock.
+- **In transit**: shipments currently moving.
+- **Awaiting invoice**: delivered PO activity ready for invoice.
+- **Recent purchase orders**: latest PO activity with channel, destination, and status.
+- **Warehouse pulse**: available stock by SKU and warehouse.
+
+Use the Overview to see what needs attention, then open the relevant page.
 
 ## 4. PO Inbox
 
-The PO Inbox is where POs are uploaded, reviewed, accepted, rejected, and opened for more detail.
+The PO Inbox is the main PO intake and review page.
 
-### Upload a PO
+### List columns
 
-1. Open **PO Inbox**.
-2. Select **Upload purchase order**.
+- **PO ID**: external PO number.
+- **Platform / destination**: sales channel and customer destination.
+- **Warehouse**: source warehouse resolved from the destination mapping.
+- **Status**: current PO state.
+- **Action**: quick Accept action when the PO is under review.
+
+Select a row to open the full PO workspace.
+
+### Upload and review a PO
+
+1. Select **Upload purchase order**.
+2. Select the source platform.
 3. Choose a PDF, XLSX, CSV, or DOCX file.
-4. Wait for the system to read the document.
-5. Check the extracted fields and line items.
-6. Correct anything that is wrong or missing.
-7. Select **Save reviewed PO**.
+4. Select **Scan and open review**.
+5. Review the extracted confidence value and fields.
+6. Correct PO ID, PO date, destination, booking deadline, customer/vendor, and total value.
+7. Review every PO line.
+8. Select the correct internal SKU for each line.
+9. Correct the quantity and unit price.
+10. Add or remove lines if the document was read incorrectly.
+11. Select **Save reviewed PO**.
 
-Files must be 10 MB or smaller. The system may read fields automatically, but the user must check the result before saving.
+Files must be 10 MB or smaller. If the file cannot be read, complete the fields manually. The product supports Amazon/RK World, Flipkart, and Blinkit-style documents with rule-based fallback when AI extraction is unavailable.
 
-### Important PO fields
+### Accept or reject a PO
 
-- **Platform**: Amazon, Flipkart, Blinkit, or another sales channel
-- **PO number**: the external PO reference
-- **Destination**: where the customer expects the goods
-- **Customer**: customer name, when supplied
-- **Deadline**: the required date, when supplied
-- **SKU**: the internal product code
-- **Quantity**: how many units were ordered
-- **Unit price**: price for one unit
+Before accepting, check the PO ID, destination, warehouse, SKU lines, quantities, and shortage.
 
-### Review a PO
+- Select **Accept** or **Accept PO** when the PO is correct.
+- Select **Reject** when it should not be processed and provide a reason.
 
-Select a PO row to open its detail view. Check:
+Acceptance starts the stock reservation gate. It does not reserve stock until the appointment gate is also complete.
 
-- Destination and assigned warehouse
-- PO value
-- Product lines and quantities
-- Inventory shortage, if any
-- Source document
-- Appointment, shipment, POD, and invoice progress
+## 5. PO full workspace
 
-If the destination has no mapping, the warehouse will show **Mapping required**. Fix the mapping or use the permitted manager override before continuing.
+The full workspace opens when you select a PO row or **Open full PO workspace**.
 
-### Accept or reject
+### Overview tab
 
-- Select **Accept PO** when the information and stock check are correct. The system blocks the required inventory.
-- Select **Reject** when the PO should not be processed. Enter a reason.
+Shows channel, PO status, customer, destination, warehouse, PO value, fulfilment progress, source document, created and accepted times, inventory state, and next steps.
 
-Do not accept a PO until its destination, SKU, quantity, and warehouse are correct.
+### Lines & Inventory tab
 
-## 5. PO detail page
+Each line shows:
 
-The PO detail page has these tabs:
+- **Ordered**: customer-requested quantity.
+- **Allocated**: quantity reserved from stock.
+- **Blocked**: quantity held for the PO.
+- **Planned**: quantity assigned to active shipment plans.
+- **Dispatched**: quantity sent from the warehouse.
+- **Delivered**: quantity confirmed on POD.
+- **Remaining**: quantity not yet delivered.
 
-### Overview
+### Appointment tab
 
-Shows the source document, creation time, acceptance time, inventory state, and next steps.
+Shows appointment ID, status, location, booking time, appointment time, and the attached document.
 
-### Lines & Inventory
+### Shipments tab
 
-Shows each SKU and its quantities:
+Shows each shipment number, truck, driver, planned dispatch time, expected arrival, cost, status, and POD state.
 
-- **Ordered**: quantity requested by the customer
-- **Allocated**: quantity assigned from stock
-- **Blocked**: allocated stock held for this PO
-- **Dispatched**: quantity sent from the warehouse
-- **Delivered**: quantity confirmed by POD
-- **Remaining**: ordered quantity not yet delivered
+### POD & Discrepancies tab
 
-### Appointment
+Shows POD files, receiver details, confirmation time, and delivery information.
 
-Shows appointment ID, status, location, booking time, appointment time, and attached document.
+### Invoice tab
 
-### Shipments
+Shows invoice number, amount, and invoice file. The invoice gate remains closed until full delivery or approved short close.
 
-Shows shipment number, truck, driver, dispatch time, expected arrival, cost, and POD status.
+### Audit Activity tab
 
-### POD & Discrepancies
+Use **Audit Log** for the permanent event list for this PO.
 
-Shows uploaded delivery documents and receiver information. Use this area to check whether the delivery was confirmed.
+## 6. Inventory
 
-### Invoice
+Inventory is a workspace with five tabs: **Stock**, **SKUs**, **Warehouses**, **Mappings**, and **UOMs & routes**.
 
-Shows invoice number, amount, and invoice file. Invoice upload is available only after full delivery or an approved short close.
+### Stock tab
 
-### Audit Activity
+The stock table shows SKU, product name, warehouse, physical quantity, blocked quantity, in-transit quantity, released quantity, threshold, and allocatable quantity.
 
-Shows where to find the permanent record of actions in **Audit Log**.
+Use **Add stock** to enter an opening balance or manual receipt. Enter SKU, warehouse, optional location, quantity, and a reason. Use a clear reason such as `Opening stock` or `Supplier receipt`.
 
-## 6. Inventory page
+Use **History** to review stock transactions. Stock changes are posted as transactions; old ledger history is not edited directly.
 
-The Inventory page has five areas: **Stock**, **SKUs**, **Warehouses**, **Mappings**, and **UOMs & routes**.
+### SKUs tab
 
-### Stock
+Add or edit SKU code, product title, item class, and base UOM. The SKU is the internal product identity used by PO lines and inventory.
 
-The Stock area shows stock by SKU and warehouse:
+### Warehouses tab
 
-- **Physical**: stock physically recorded at the warehouse
-- **Blocked**: stock reserved for accepted POs
-- **Allocatable**: stock still available to use
+Add or edit warehouse code, name, city, and state. Locations can be created under a warehouse with a code, name, and type such as warehouse, zone, rack, bin, quarantine, rejected, or return.
 
-Select **Adjust stock** to add stock. Enter:
-
-- SKU
-- Warehouse
-- Optional location
-- Quantity
-- Reason
-
-Always enter a clear reason, such as `Opening stock`, `Cycle count correction`, or `Supplier receipt`.
-
-Select **History** to see stock transactions. Stock history should be corrected through a new transaction, not by changing old history.
-
-### SKUs
-
-An SKU is the internal code for a product. Add or edit:
-
-- SKU code
-- Product title
-- Item class, such as FG, RM, PM, or KIT
-- Base unit of measure
-
-Use one consistent SKU for the same product. This is what connects PO lines to inventory.
-
-### Warehouses
-
-Add or edit:
-
-- Warehouse code
-- Warehouse name
-- City
-- State
-
-You can also add warehouse locations. A location has a code, name, warehouse, and type such as warehouse, zone, rack, bin, quarantine, rejected, or return.
-
-### Mappings
-
-Mapping tells the system that two names refer to the same thing.
+### Mappings tab
 
 #### Channel SKU mapping
 
-Connects an external marketplace product code to an internal SKU.
+Connects a channel product identifier to an internal SKU.
 
-Example: `AMZ-123` on Amazon = internal SKU `KB-001`.
+Example: Amazon `B0CZTQBG78` -> internal SKU `NT-8906006351271`.
 
-Enter:
-
-- Mapping type: **Channel SKU**
-- Channel
-- Internal SKU
-- External product code
+Enter channel, internal SKU, and external product code.
 
 #### Destination mapping
 
-Connects a marketplace destination to the warehouse and source location that should fulfil it.
+Connects a channel destination to the source warehouse and stock location. Enter channel, destination key, destination name, warehouse, and source location.
 
-Example: `Bengaluru FC` -> Bengaluru Warehouse -> Stock location.
+### UOMs & routes tab
 
-Enter:
+Create units of measure with code, name, and dimension. Create route estimates with warehouse, destination key, transit hours, and estimated cost.
 
-- Mapping type: **Destination**
-- Channel
-- Destination key
-- Destination name
-- Warehouse
-- Source location
-
-Good mappings help the system assign the correct warehouse automatically when a PO is uploaded.
-
-### UOMs & routes
-
-#### Units of measure (UOMs)
-
-Add a code, name, and dimension. Examples are `EA` for each, `KG` for weight, or `L` for length.
-
-#### Route estimates
-
-Add the warehouse, destination key, transit hours, and estimated cost. These values help the team plan movement and expected arrival.
-
-## 7. Shipments page
+## 7. Shipments
 
 The Shipments page tracks truck-level movement.
 
-### Plan a shipment
+### Plan a shipment manually
 
-1. Confirm that the PO has an accepted reservation and appointment.
-2. Select **Plan** for the ready PO.
-3. Enter truck number.
-4. Enter driver name and phone.
-5. Enter planned dispatch time.
-6. Check the reserved quantity.
-7. Select **Create shipment**.
+1. Confirm the PO has an accepted reservation and appointment.
+2. Open **Shipments**.
+3. Select **Plan shipment** for the PO.
+4. Enter truck number, driver name, driver phone, and planned dispatch time.
+5. Enter a quantity in **This shipment** for each SKU that belongs on this truck.
+6. Leave other SKU quantities at zero.
+7. Check **units selected for this shipment**.
+8. Select **Create shipment**.
 
-### Dispatch
+The modal shows the remaining quantity for each SKU. It starts all shipment quantities at zero. Create another shipment for the same PO when another truck is ready.
 
-For a planned shipment, select **Dispatch**. The system moves the dispatched quantity into in-transit stock.
+The system rejects a plan that exceeds the reserved quantity. It also keeps planned quantity visible so you do not accidentally plan the same stock twice.
 
-### Confirm delivery
+### Dispatch a shipment
 
-When the truck has delivered, select **Confirm POD**. Upload the POD document and enter:
+1. Find a shipment with status **PLANNED**.
+2. Check the vehicle and planned lines.
+3. Select **Dispatch**.
 
-- Receiver
-- Delivery time
+Dispatch moves the shipment quantity from blocked stock to in-transit stock.
 
-The system uses the delivery confirmation to update delivered quantities and remove delivered stock from company inventory.
+### Confirm POD
 
-## 8. Appointments page
+1. Find a dispatched or in-transit shipment.
+2. Select **Confirm POD**.
+3. Upload the POD document.
+4. Enter receiver and delivery time.
+5. Enter delivered, short, damaged, and rejected quantities for each outstanding shipment line.
+6. Save the POD.
 
-Appointments are booked outside this system. This page records the appointment information after booking.
+The system checks the quantities against the outstanding dispatched quantity and updates PO delivery progress.
+
+## 8. Appointments
+
+Appointments are booked outside SCM. This page records the appointment after booking.
+
+### Attach an appointment
 
 1. Open **Appointments**.
-2. Find the PO marked **Pending booking**.
+2. Find a PO marked **Pending booking**.
 3. Select **Attach appointment**.
-4. Upload the appointment document.
-5. Enter appointment ID, appointment time, and location when needed.
-6. Save the record.
+4. Upload the appointment file.
+5. Enter appointment ID, appointment time, and location.
+6. Save.
 
-The appointment is then visible on the PO detail page.
+The PO can reach reservation readiness when both appointment and acceptance are complete.
 
-## 9. Invoices page
+## 9. Invoices and short close
 
-Invoices are created outside SCM and uploaded here after delivery.
+The Invoices page contains the delivery and closure queue.
 
 ### Upload an invoice
 
 1. Open **Invoices**.
-2. Find a PO marked **Fully delivered** or **Short closed**.
+2. Find a PO marked **FULLY_DELIVERED** or **SHORT_CLOSED**.
 3. Select **Upload invoice**.
-4. Choose the invoice file.
+4. Upload the invoice document.
 5. Enter invoice number, invoice date, and amount.
-6. Select the upload action.
+6. Save.
 
-The invoice is linked to the PO. One external invoice is expected per PO.
+Only one invoice is allowed for a PO.
 
-### Short close
+### Short close a PO
 
-Use **Short close** when the PO will not be fully delivered but the remaining quantity is accepted as closed.
+Use short close when the remaining quantity will not be supplied.
 
-Enter:
+1. Find a PO with a delivery issue or partial delivery.
+2. Select **Short close**.
+3. Enter the remaining quantity.
+4. Enter the reason.
+5. Select **Approve short close**.
 
-- Remaining quantity
-- Reason
+Short close releases the remaining blocked stock and opens the invoice gate. It is an approval action and should be used only with a clear business reason.
 
-Short close approval is a manager-level action. It should only be used with a clear business reason.
+## 10. Administration
 
-## 10. Administration page
-
-Administration shows controlled master data used by the operation:
-
-- Platforms or channels
-- Warehouses
-- SKUs
-
-Use the Inventory page for the detailed setup of SKUs, warehouses, locations, mappings, UOMs, and routes. Administrators maintain this data so normal users can process POs consistently.
+Administration gives a compact view of platforms/channels, warehouses, and SKUs. Use the Inventory workspace for detailed master-data creation and editing.
 
 ## 11. Audit Log
 
-The Audit Log is the permanent history of important actions. It shows:
+The Audit Log shows recent permanent operational events: action, record type and record ID, user, and time.
 
-- Action performed
-- Record type and record ID
-- User
-- Time
+Use it to answer who accepted a PO, changed a mapping, added stock, created a shipment, dispatched a truck, uploaded a POD, approved short close, or uploaded an invoice.
 
-Use it to answer questions such as:
-
-- Who accepted or rejected a PO?
-- Who changed master data?
-- Who adjusted stock?
-- Who approved a short close?
-- When was a POD or invoice uploaded?
-
-Audit history is for traceability. It should not be treated as a normal editable list.
-
-## 12. Normal daily workflow
-
-### New PO
-
-1. Upload the PO in **PO Inbox**.
-2. Review the extracted information.
-3. Confirm SKU mappings and destination mapping.
-4. Check warehouse and inventory.
-5. Accept or reject the PO.
-
-### Before dispatch
-
-1. Attach the appointment letter.
-2. Confirm the appointment details.
-3. Open **Shipments**.
-4. Plan the truck and driver.
-5. Dispatch the shipment.
-
-### After delivery
-
-1. Upload and confirm the POD.
-2. Check delivered and remaining quantities.
-3. If fully delivered, upload the invoice.
-4. If the remainder will not be supplied, request an approved short close.
-5. Upload the invoice after short close approval.
-
-## 13. Common problems
+## 12. Common problems
 
 ### Warehouse shows “Mapping required”
 
-The destination is not connected to a warehouse. Add or correct a destination mapping in **Inventory -> Mappings**.
+Create or correct a destination mapping in **Inventory -> Mappings**.
 
-### A PO line does not match inventory
+### A PO line has no matching SKU
 
-The external product code may not be mapped to the correct internal SKU. Add a **Channel SKU** mapping, then review the PO again.
+Create a Channel SKU mapping or select the internal SKU manually during PO review.
 
 ### Allocatable stock is lower than physical stock
 
-Some stock may already be blocked, or the system may be protecting threshold stock. Check the Stock tab and the PO reservations.
+Some stock may already be blocked, in transit, or protected by the threshold. Check the Stock tab and PO reservations.
 
 ### Shipment cannot be planned
 
-The PO may not have an accepted inventory reservation, an appointment, or any remaining allocated quantity.
+Check that the PO has both an accepted reservation and an appointment, and that at least one line still has unplanned reserved quantity.
+
+### Shipment quantity is rejected
+
+The selected quantity is greater than the remaining reserved balance. Reduce the quantity or check earlier shipment plans.
 
 ### Invoice upload is unavailable
 
 The PO must be fully delivered or approved for short close first.
 
-### A document will not upload
+### Document upload fails
 
-Check that the file is PDF, XLSX, CSV, or DOCX and is no larger than 10 MB.
+Use PDF, XLSX, CSV, or DOCX and keep the file at or below 10 MB. Check that the file content matches its extension.
 
-## 14. Good data-entry habits
+## 13. Good operating habits
 
-- Use the same SKU code everywhere.
-- Use exact marketplace destination names in mappings.
-- Enter reasons for stock changes and short closes.
-- Check extracted documents before saving.
-- Do not create duplicate mappings for the same channel and product.
-- Do not accept a PO with the wrong warehouse or quantity.
-- Confirm POD quantities carefully before uploading the invoice.
+- Review every extracted field before saving a PO.
+- Use one internal SKU for one product.
+- Maintain exact destination mappings.
+- Check the warehouse before accepting a PO.
+- Plan only the quantity physically assigned to each truck.
+- Use a new shipment for every separate truck movement.
+- Confirm POD quantities carefully.
+- Enter clear reasons for stock changes and short close.
 - Use Audit Log when investigating a change.
+
+For architecture and implementation details, read [PRODUCT-DOC.md](PRODUCT-DOC.md).

@@ -1213,21 +1213,13 @@ function Inventory({ rows, onAction }: { rows: any[]; onAction: Function }) {
 }
 function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
   const [podPo, setPodPo] = useState<PO | null>(null),
-    [planPo, setPlanPo] = useState<PO | null>(null);
+    [createShipment, setCreateShipment] = useState(false);
   const items = pos.flatMap((p) =>
       (p.shipments || []).map((s: any) => ({
         ...s,
         externalId: p.externalId,
         po: p,
       })),
-    ),
-    ready = pos.filter(
-      (p) =>
-        p.reservation &&
-        p.appointment &&
-        (p.lines || []).some(
-          (l: any) => Number(l.allocated || 0) > Number(l.dispatched || 0),
-        ),
     );
   return (
     <>
@@ -1236,15 +1228,13 @@ function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
           <p className="text-sm text-slate-500">Truck-level movement</p>
           <h2 className="text-3xl font-semibold mt-2">Shipment tracker</h2>
         </div>
-        {ready[0] && (
-          <button
-            onClick={() => setPlanPo(ready[0])}
-            className="rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-white"
-          >
-            <Plus size={16} className="mr-2 inline" />
-            Plan {ready[0].externalId}
-          </button>
-        )}
+        <button
+          onClick={() => setCreateShipment(true)}
+          className="rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-white"
+        >
+          <Plus size={16} className="mr-2 inline" />
+          Create shipment
+        </button>
       </div>
       <Section title={`${items.length} shipments`}>
         <div className="grid grid-cols-5 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
@@ -1288,10 +1278,10 @@ function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
           </div>
         ))}
       </Section>
-      {planPo && (
+      {createShipment && (
         <ShipmentPlanModal
-          po={planPo}
-          onClose={() => setPlanPo(null)}
+          pos={pos}
+          onClose={() => setCreateShipment(false)}
           onAction={onAction}
         />
       )}{" "}

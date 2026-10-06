@@ -1,5 +1,6 @@
 # SCM Business Operating System
 
+[Read the Product Doc](PRODUCT-DOC.md) for the product overview, architecture, data flows, page reference, and implementation map.
 [Read the user guide](USER-GUIDE.md) for page explanations, data-entry instructions, and the full PO-to-invoice workflow.
 
 This workspace contains the namespaced SCM v2 workflow from the PRD. It uses React/Vite/Tailwind in `apps/web`, NestJS in `apps/api`, and Supabase for PostgreSQL data and authentication.

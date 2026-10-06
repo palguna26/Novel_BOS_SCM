@@ -88,6 +88,9 @@ export class AppService {
           skuId: line.item_id,
           ordered: Number(line.ordered_quantity),
           allocated: Number(reservationLine?.reserved_quantity || 0),
+          planned: relatedShipments
+            .filter(x => shipmentById.get(x.shipment_id)?.status !== 'CANCELLED')
+            .reduce((sum, x) => sum + Number(x.planned_quantity || 0), 0),
           dispatched: relatedShipments.reduce((sum, x) => sum + Number(x.dispatched_quantity || 0), 0),
           delivered: relatedShipments.reduce((sum, x) => sum + Number(x.delivered_quantity || 0), 0),
           unitPrice: Number(line.unit_price),
