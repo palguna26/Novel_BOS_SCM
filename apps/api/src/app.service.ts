@@ -45,6 +45,10 @@ export class AppService {
     if (error) throw new BadRequestException(`Audit logging failed: ${error.message}`);
   }
 
+  async auditRead(user: AuthenticatedUser, action: string, entityType: string, entityId: string, newValue: any) {
+    await this.auditMutation(user, action, entityType, entityId, null, newValue);
+  }
+
   private async rows(schema: string, table: string, companyId: string, order?: string) {
     let query = this.sb.schema(schema).from(table).select('*').eq('company_id', companyId);
     if (order) query = query.order(order, { ascending: false });
@@ -121,13 +125,21 @@ export class AppService {
         poDate: po.po_date,
         totalValue: Number(po.total_value),
         destination: po.destination_name,
+        destinationAddress: po.destination_address || po.destination_name,
+        destinationCity: po.destination_city || null,
+        destinationState: po.destination_state || null,
+        destinationPostalCode: po.destination_postal_code || null,
+        sourceAddress: po.source_address || null,
+        sourceCity: po.source_city || sites.find(x => x.id === po.source_site_id)?.city || null,
+        sourceState: po.source_state || sites.find(x => x.id === po.source_site_id)?.state || null,
+        sourcePostalCode: po.source_postal_code || null,
         warehouseId: po.source_site_id,
         createdAt: po.created_at,
         platform: channels.find(x => x.id === po.channel_id),
         warehouse: sites.find(x => x.id === po.source_site_id),
         document: documents.find(x => x.id === po.source_document_version_id) || null,
         gate: gates.find(x => x.purchase_order_id === po.id),
-        appointment: activeAppointment ? { ...activeAppointment, appointmentId: activeAppointment.appointment_number, location: activeAppointment.location_name } : null,
+        appointment: activeAppointment ? { ...activeAppointment, appointmentId: activeAppointment.appointment_number, location: activeAppointment.location_name, sourceAddress: activeAppointment.source_address, sourceCity: activeAppointment.source_city, sourceState: activeAppointment.source_state, sourcePostalCode: activeAppointment.source_postal_code, destinationAddress: activeAppointment.destination_address, destinationCity: activeAppointment.destination_city, destinationState: activeAppointment.destination_state, destinationPostalCode: activeAppointment.destination_postal_code, facilityName: activeAppointment.facility_name, resolutionStatus: activeAppointment.resolution_status, matchDetails: activeAppointment.match_details } : null,
         reservation: activeReservation || null,
         lines: poLines,
         shipments: poShipments,
@@ -235,7 +247,8 @@ export class AppService {
 
   async createWarehouse(user: AuthenticatedUser, body: Row) {
     this.approve(user);
-    const { data, error } = await this.sb.schema('master_data').from('sites').insert({ company_id: user.companyId, code: body.code, name: body.name, city: body.city, state: body.state, site_type: 'WAREHOUSE' }).select().single();
+    if (!body.code?.trim() || !body.name?.trim() || !body.city?.trim()) throw new BadRequestException('Warehouse code, name and city are required');
+    const { data, error } = await this.sb.schema('master_data').from('sites').insert({ company_id: user.companyId, code: body.code, name: body.name, city: body.city, state: body.state, address_line1: body.addressLine1 || null, address_line2: body.addressLine2 || null, postal_code: body.postalCode || null, site_type: 'WAREHOUSE', active: body.active !== false }).select().single();
     const result = this.result(data, error);
     await this.auditMutation(user, 'WAREHOUSE_CREATED', 'MASTER_DATA_SITE', result.id, null, result);
     return result;
@@ -245,8 +258,27 @@ export class AppService {
     return this.updateCompanyRow(user, 'master_data', 'items', id, body, ['code', 'name', 'item_class', 'brand', 'category', 'variant', 'base_uom_id', 'lifecycle_status', 'active_from', 'active_to']);
   }
 
+  async createPlatform(user: AuthenticatedUser, body: Row) {
+    this.approve(user);
+    if (!body.code?.trim() || !body.name?.trim()) throw new BadRequestException('Platform code and name are required');
+    const { data, error } = await this.sb.schema('master_data').from('channels').insert({ company_id: user.companyId, code: body.code.trim(), name: body.name.trim(), channel_type: body.channelType || 'MARKETPLACE', ingestion_method: body.ingestionMethod || 'FILE', active: body.active !== false }).select().single();
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'PLATFORM_CREATED', 'MASTER_DATA_CHANNEL', result.id, null, result);
+    return result;
+  }
+
+  async updatePlatform(user: AuthenticatedUser, id: string, body: Row) {
+    const normalized = { ...body, channel_type: body.channel_type || body.channelType, ingestion_method: body.ingestion_method || body.ingestionMethod };
+    const result = await this.updateCompanyRow(user, 'master_data', 'channels', id, normalized, ['code', 'name', 'channel_type', 'ingestion_method', 'active']);
+    await this.auditMutation(user, body.active === false ? 'PLATFORM_DEACTIVATED' : 'PLATFORM_UPDATED', 'MASTER_DATA_CHANNEL', id, null, result);
+    return result;
+  }
+
   async updateWarehouse(user: AuthenticatedUser, id: string, body: Row) {
-    return this.updateCompanyRow(user, 'master_data', 'sites', id, body, ['code', 'name', 'city', 'state', 'active']);
+    const normalized = { ...body, address_line1: body.address_line1 || body.addressLine1, address_line2: body.address_line2 || body.addressLine2, postal_code: body.postal_code || body.postalCode };
+    const result = await this.updateCompanyRow(user, 'master_data', 'sites', id, normalized, ['code', 'name', 'city', 'state', 'address_line1', 'address_line2', 'postal_code', 'active']);
+    await this.auditMutation(user, body.active === false ? 'WAREHOUSE_DEACTIVATED' : 'WAREHOUSE_UPDATED', 'MASTER_DATA_SITE', id, null, result);
+    return result;
   }
 
   async createLocation(user: AuthenticatedUser, body: Row) {
@@ -286,15 +318,16 @@ export class AppService {
 
   async createRoute(user: AuthenticatedUser, body: Row) {
     this.approve(user);
-    if (!body.warehouseId || !body.destinationKey || Number(body.transitHours) <= 0) throw new BadRequestException('Warehouse, destination and transit hours are required');
-    const { data, error } = await this.sb.schema('master_data').from('routes').insert({ company_id: user.companyId, source_site_id: body.warehouseId, destination_key: body.destinationKey, transit_hours: Number(body.transitHours), estimated_cost: Number(body.estimatedCost || 0), currency: body.currency || 'INR' }).select().single();
+    const destinationCity = body.destinationCity || body.destinationKey;
+    if (!body.warehouseId || !destinationCity || Number(body.transitHours) <= 0) throw new BadRequestException('Warehouse, destination city and transit hours are required');
+    const { data, error } = await this.sb.schema('master_data').from('routes').insert({ company_id: user.companyId, source_site_id: body.warehouseId, destination_key: destinationCity, destination_city: destinationCity, transit_hours: Number(body.transitHours), estimated_cost: Number(body.estimatedCost || 0), currency: body.currency || 'INR' }).select().single();
     const result = this.result(data, error);
     await this.auditMutation(user, 'ROUTE_CREATED', 'MASTER_DATA_ROUTE', result.id, null, result);
     return result;
   }
 
   async updateRoute(user: AuthenticatedUser, id: string, body: Row) {
-    return this.updateCompanyRow(user, 'master_data', 'routes', id, body, ['destination_key', 'transit_hours', 'estimated_cost', 'currency', 'active']);
+    return this.updateCompanyRow(user, 'master_data', 'routes', id, body, ['destination_key', 'destination_city', 'transit_hours', 'estimated_cost', 'currency', 'active']);
   }
 
   async createUom(user: AuthenticatedUser, body: Row) {

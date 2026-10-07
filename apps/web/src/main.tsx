@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   Boxes,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   ClipboardList,
   FileText,
@@ -30,6 +31,7 @@ import {
   History,
   Mail,
   UserRound,
+  MessageCircle,
 } from "lucide-react";
 import "./index.css";
 import { Button as UiButton } from "./components/ui/button";
@@ -46,6 +48,7 @@ import { InventoryWorkspace } from "./components/InventoryWorkspace";
 import { DocumentWorkflowModal } from "./components/DocumentWorkflowModal";
 import { ShipmentPlanModal } from "./components/ShipmentPlanModal";
 import { ShortCloseModal } from "./components/ShortCloseModal";
+import { CopilotPanel } from "./components/CopilotPanel";
 import {
   DOCUMENT_ACCEPT,
   DOCUMENT_FORMATS,
@@ -204,7 +207,8 @@ function App() {
     [page, setPage] = useState("Overview"),
     [data, setData] = useState<any>({}),
     [selected, setSelected] = useState<PO | null>(null),
-    [toast, setToast] = useState("");
+    [toast, setToast] = useState(""),
+    [copilotOpen, setCopilotOpen] = useState(false);
   useEffect(() => {
     const t = localStorage.getItem("scm_token");
     if (t)
@@ -329,6 +333,9 @@ function App() {
             <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-semibold">
               {user.name[0]}
             </div>
+            <button onClick={() => setCopilotOpen(true)} className="flex items-center gap-2 rounded-xl bg-emerald-700 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-800">
+              <MessageCircle size={16} /> Copilot
+            </button>
           </div>
         </header>
         <div className="p-10 max-w-[1500px]">
@@ -378,6 +385,7 @@ function App() {
           onAction={action}
         />
       )}
+      {copilotOpen && <CopilotPanel api={api} page={page} context={selected ? { selectedPo: selected.externalId } : undefined} onClose={() => setCopilotOpen(false)} />}
     </div>
   );
 }
@@ -796,7 +804,16 @@ function ReviewUploadForm({
       setBody({
         platformId,
         externalId: extracted.externalId || "",
-        destination: extracted.destination || extracted.fcCode || "",
+        destination: extracted.destinationCity || extracted.destination || extracted.fcCode || "",
+        destinationName: extracted.destinationAddress || extracted.destination || extracted.destinationCity || extracted.fcCode || "",
+        destinationAddress: extracted.destinationAddress || extracted.destination || "",
+        destinationCity: extracted.destinationCity || "",
+        sourceAddress: extracted.sourceAddress || "",
+        sourceCity: extracted.sourceCity || "",
+        sourceState: extracted.sourceState || "",
+        sourcePostalCode: extracted.sourcePostalCode || "",
+        destinationState: extracted.destinationState || "",
+        destinationPostalCode: extracted.destinationPostalCode || "",
         poDate: extracted.poDate || "",
         deadline: extracted.expiryDate ? `${extracted.expiryDate}T00:00` : "",
         customer: extracted.customer || extracted.supplier || "",
@@ -976,6 +993,42 @@ function ReviewUploadForm({
                             onChange={(e) =>
                               setBody({ ...body, destination: e.target.value })
                             }
+                          />
+                        </UiLabel>
+                        <UiLabel>
+                          Source address
+                          <UiInput
+                            className="mt-2"
+                            value={body.sourceAddress || ""}
+                            placeholder="Not extracted"
+                            onChange={(e) => setBody({ ...body, sourceAddress: e.target.value })}
+                          />
+                        </UiLabel>
+                        <UiLabel>
+                          Source city
+                          <UiInput
+                            className="mt-2"
+                            value={body.sourceCity || ""}
+                            placeholder="Required for warehouse resolution"
+                            onChange={(e) => setBody({ ...body, sourceCity: e.target.value })}
+                          />
+                        </UiLabel>
+                        <UiLabel>
+                          Destination address
+                          <UiInput
+                            className="mt-2"
+                            value={body.destinationAddress || ""}
+                            placeholder="Not extracted"
+                            onChange={(e) => setBody({ ...body, destinationAddress: e.target.value })}
+                          />
+                        </UiLabel>
+                        <UiLabel>
+                          Destination city
+                          <UiInput
+                            className="mt-2"
+                            value={body.destinationCity || ""}
+                            placeholder="Not extracted"
+                            onChange={(e) => setBody({ ...body, destinationCity: e.target.value, destination: e.target.value || body.destination })}
                           />
                         </UiLabel>
                         <UiLabel>
@@ -1298,7 +1351,8 @@ function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
   );
 }
 function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
-  const [selected, setSelected] = useState<PO | null>(null);
+  const [selected, setSelected] = useState<PO | null>(null),
+    [expanded, setExpanded] = useState<Record<string, boolean>>({});
   return (
     <>
       <div className="mb-7">
@@ -1314,34 +1368,43 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
           <span>Status</span>
           <span>Appointment</span>
         </div>
-        {pos.map((p) => (
-          <div
-            className="grid grid-cols-4 px-5 py-5 border-t border-slate-50 items-center"
-            key={p.id}
-          >
-            <span className="mono text-sm font-semibold">{p.externalId}</span>
-            <span className="text-sm">{p.destination}</span>
-            <span>
-              {p.appointment ? (
-                <Badge tone="green">{p.appointment.status}</Badge>
-              ) : (
-                <Badge tone="amber">Pending booking</Badge>
+        {pos.map((p) => {
+          const isExpanded = Boolean(expanded[p.id]);
+          return (
+            <div key={p.id}>
+              <button
+                type="button"
+                onClick={() => setExpanded((current) => ({ ...current, [p.id]: !current[p.id] }))}
+                className="grid w-full grid-cols-4 items-center border-t border-slate-50 px-5 py-5 text-left hover:bg-slate-50"
+              >
+                <span className="flex items-center gap-2 mono text-sm font-semibold">
+                  {isExpanded ? <ChevronDown size={15} className="text-slate-400" /> : <ChevronRight size={15} className="text-slate-400" />}
+                  {p.externalId}
+                </span>
+                <span className="text-sm">{p.destination}</span>
+                <span>{p.appointment ? <Badge tone="green">{p.appointment.status}</Badge> : <Badge tone="amber">Pending booking</Badge>}</span>
+                <span className="text-sm">{p.appointment?.appointmentAt ? new Date(p.appointment.appointmentAt).toLocaleString() : "No appointment attached"}</span>
+              </button>
+              {isExpanded && (
+                <div className="border-t border-emerald-100 bg-emerald-50/30 px-8 py-5">
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {[['PO status', p.status?.replaceAll('_', ' ') || '—'], ['Source address', p.appointment?.sourceAddress || p.sourceAddress || 'Not extracted'], ['Destination address', p.appointment?.destinationAddress || p.destinationAddress || p.destination || 'Not extracted'], ['Warehouse', p.warehouse?.name || 'Mapping required'], ['Customer', p.customer || '—'], ['Platform', p.platform?.name || '—'], ['Appointment status', p.appointment?.status || 'Pending booking'], ['Appointment date', p.appointment?.appointmentAt ? new Date(p.appointment.appointmentAt).toLocaleString() : 'Not attached']].map(([label, value]) => (
+                      <div key={label} className="rounded-xl bg-white p-3">
+                        <div className="text-xs text-slate-400">{label}</div>
+                        <div className="mt-1 text-sm font-medium">{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {!p.appointment?.appointmentAt && (
+                    <button onClick={() => setSelected(p)} className="mt-4 text-sm font-semibold text-emerald-700">
+                      Attach appointment
+                    </button>
+                  )}
+                </div>
               )}
-            </span>
-            <span className="text-sm">
-              {p.appointment?.appointmentAt ? (
-                new Date(p.appointment.appointmentAt).toLocaleString()
-              ) : (
-                <button
-                  onClick={() => setSelected(p)}
-                  className="text-xs font-semibold text-emerald-700"
-                >
-                  Attach appointment
-                </button>
-              )}
-            </span>
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </Section>
       {selected && (
         <DocumentWorkflowModal
@@ -1433,48 +1496,30 @@ function Invoices({ pos, onAction }: { pos: PO[]; onAction: Function }) {
     </>
   );
 }
-function Masters({ data, onAction }: { data: any; onAction: Function }) {
-  return (
-    <>
-      <div className="mb-7">
-        <p className="text-sm text-slate-500">Controlled operational data</p>
-        <h2 className="text-3xl font-semibold mt-2">Administration</h2>
-      </div>
-      <div className="grid grid-cols-3 gap-5">
-        <Section title="Platforms">
-          <div className="p-5 space-y-4">
-            {(data.platforms || []).map((x: any) => (
-              <div className="flex justify-between text-sm" key={x.id}>
-                <span>{x.name}</span>
-                <Badge tone="green">Active</Badge>
-              </div>
-            ))}
-          </div>
-        </Section>
-        <Section title="Warehouses">
-          <div className="p-5 space-y-4">
-            {(data.warehouses || []).map((x: any) => (
-              <div className="flex justify-between text-sm" key={x.id}>
-                <span>{x.name}</span>
-                <span className="mono text-xs text-slate-400">{x.code}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-        <Section title="SKUs">
-          <div className="p-5 space-y-4">
-            {(data.skus || []).map((x: any) => (
-              <div className="flex justify-between text-sm" key={x.id}>
-                <span>{x.name}</span>
-                <span className="mono text-xs text-slate-400">{x.code}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      </div>
-    </>
-  );
+function AdminModal({ title, children, close }: { title: string; children: any; close: () => void }) {
+  return <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-6"><div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl"><div className="mb-5 flex items-center justify-between"><h3 className="text-lg font-semibold">{title}</h3><button onClick={close}><XCircle size={18}/></button></div>{children}</div></div>;
 }
+function Masters({ data, onAction }: { data: any; onAction: Function }) {
+  const [modal, setModal] = useState<'platform' | 'warehouse' | null>(null), [edit, setEdit] = useState<any>(null), [error, setError] = useState('');
+  const open = (type: 'platform' | 'warehouse', value?: any) => { setError(''); setEdit(value || null); setModal(type); };
+  const save = async (path: string, body: any) => { setError(''); const ok = await onAction(path, body); if (ok) { setModal(null); setEdit(null); location.reload(); } };
+  return <>
+    <div className="mb-7"><p className="text-sm text-slate-500">Controlled operational data</p><h2 className="text-3xl font-semibold mt-2">Administration</h2></div>
+    <div className="grid grid-cols-3 gap-5">
+      <Section title="Platforms" action={<button onClick={() => open('platform')} className="rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white"><Plus size={14} className="mr-1 inline"/>Add platform</button>}>
+        <div className="p-5 space-y-4">{(data.platforms || []).map((x: any) => <div className="flex items-center justify-between gap-3 text-sm" key={x.id}><div><div className="font-medium">{x.name}</div><div className="mono text-xs text-slate-400">{x.code} · {x.channel_type || 'MARKETPLACE'}</div></div><div className="flex items-center gap-2"><Badge tone={x.active === false ? 'slate' : 'green'}>{x.active === false ? 'Inactive' : 'Active'}</Badge><button onClick={() => open('platform', x)} className="text-xs font-semibold text-emerald-700">Edit</button></div></div>)}</div>
+      </Section>
+      <Section title="Warehouses" action={<button onClick={() => open('warehouse')} className="rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white"><Plus size={14} className="mr-1 inline"/>Add warehouse</button>}>
+        <div className="p-5 space-y-4">{(data.warehouses || []).map((x: any) => <div className="flex items-center justify-between gap-3 text-sm" key={x.id}><div><div className="font-medium">{x.name}</div><div className="text-xs text-slate-500">{x.city || 'City not set'}{x.state ? ` · ${x.state}` : ''}</div><div className="mono text-xs text-slate-400">{x.code}</div></div><div className="flex items-center gap-2"><Badge tone={x.active === false ? 'slate' : 'green'}>{x.active === false ? 'Inactive' : 'Active'}</Badge><button onClick={() => open('warehouse', x)} className="text-xs font-semibold text-emerald-700">Edit</button></div></div>)}</div>
+      </Section>
+      <Section title="SKUs"><div className="p-5 space-y-4">{(data.skus || []).map((x: any) => <div className="flex justify-between text-sm" key={x.id}><span>{x.name}</span><span className="mono text-xs text-slate-400">{x.code}</span></div>)}</div></Section>
+    </div>
+    {modal === 'platform' && <AdminModal title={edit ? 'Edit platform' : 'Add platform'} close={() => setModal(null)}><PlatformAdminForm value={edit} error={error} save={(body: any) => save(edit ? `/api/platforms/${edit.id}` : '/api/platforms', body)} /></AdminModal>}
+    {modal === 'warehouse' && <AdminModal title={edit ? 'Edit warehouse' : 'Add warehouse'} close={() => setModal(null)}><WarehouseAdminForm value={edit} error={error} save={(body: any) => save(edit ? `/api/warehouses/${edit.id}` : '/api/warehouses', body)} /></AdminModal>}
+  </>;
+}
+function PlatformAdminForm({ value, error, save }: any) { const [v, setV] = useState<any>(value || { channelType: 'MARKETPLACE', ingestionMethod: 'FILE', active: true }); return <form className="space-y-4" onSubmit={e => { e.preventDefault(); save(v); }}><UiLabel>Platform code<UiInput className="mt-1" required value={v.code || ''} onChange={e => setV({ ...v, code: e.target.value })}/></UiLabel><UiLabel>Platform name<UiInput className="mt-1" required value={v.name || ''} onChange={e => setV({ ...v, name: e.target.value })}/></UiLabel><UiLabel>Type<select className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={v.channelType || v.channel_type || 'MARKETPLACE'} onChange={e => setV({ ...v, channelType: e.target.value })}>{['MARKETPLACE','QUICK_COMMERCE','D2C','DISTRIBUTOR','B2B','RETAIL'].map(x => <option key={x}>{x}</option>)}</select></UiLabel><UiLabel>Ingestion method<select className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={v.ingestionMethod || v.ingestion_method || 'FILE'} onChange={e => setV({ ...v, ingestionMethod: e.target.value })}>{['API','FILE','PORTAL_EXPORT','MANUAL'].map(x => <option key={x}>{x}</option>)}</select></UiLabel>{error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}<div className="flex gap-2"><button className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save platform</button>{value && <button type="button" onClick={() => save(`/api/platforms/${value.id}`, { active: false })} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700">Deactivate</button>}</div></form>; }
+function WarehouseAdminForm({ value, error, save }: any) { const [v, setV] = useState<any>(value || { active: true }); return <form className="space-y-4" onSubmit={e => { e.preventDefault(); save(v); }}><div className="grid gap-4 sm:grid-cols-2"><UiLabel>Warehouse code<UiInput className="mt-1" required value={v.code || ''} onChange={e => setV({ ...v, code: e.target.value })}/></UiLabel><UiLabel>Warehouse name<UiInput className="mt-1" required value={v.name || ''} onChange={e => setV({ ...v, name: e.target.value })}/></UiLabel><UiLabel>City<UiInput className="mt-1" required value={v.city || ''} onChange={e => setV({ ...v, city: e.target.value })}/></UiLabel><UiLabel>State<UiInput className="mt-1" value={v.state || ''} onChange={e => setV({ ...v, state: e.target.value })}/></UiLabel><UiLabel>Address line 1<UiInput className="mt-1" value={v.addressLine1 || v.address_line1 || ''} onChange={e => setV({ ...v, addressLine1: e.target.value })}/></UiLabel><UiLabel>Postal code<UiInput className="mt-1" value={v.postalCode || v.postal_code || ''} onChange={e => setV({ ...v, postalCode: e.target.value })}/></UiLabel></div><UiLabel>Address line 2<UiInput className="mt-1" value={v.addressLine2 || v.address_line2 || ''} onChange={e => setV({ ...v, addressLine2: e.target.value })}/></UiLabel>{error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}<div className="flex gap-2"><button className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save warehouse</button>{value && <button type="button" onClick={() => save(`/api/warehouses/${value.id}`, { active: false })} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700">Deactivate</button>}</div></form>; }
 function Audit() {
   const [rows, setRows] = useState<any[]>([]);
   useEffect(() => {
@@ -1540,7 +1585,8 @@ function Details({
           <Badge tone="blue">{po.status.replaceAll("_", " ")}</Badge>
           <div className="grid grid-cols-2 gap-4 mt-6">
             {[
-              ["Destination", po.destination],
+              ["Source address", po.appointment?.sourceAddress || po.sourceAddress || po.warehouse?.address || "Not extracted"],
+              ["Destination address", po.appointment?.destinationAddress || po.destinationAddress || po.destination],
               ["Warehouse", po.warehouse?.name || "Mapping required"],
               ["Customer", po.customer || "â€”"],
               ["PO value", `â‚¹ ${po.totalValue || 0}`],

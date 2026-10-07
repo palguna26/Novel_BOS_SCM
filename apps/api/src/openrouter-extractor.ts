@@ -18,11 +18,11 @@ export const DOCUMENT_EXTRACTION_SCHEMA={
     platform:{type:'string',enum:['AMAZON_RK','FLIPKART','BLINKIT','UNKNOWN']},
     kind:{type:'string',enum:['PURCHASE_ORDER','APPOINTMENT','CONSIGNMENT','UNKNOWN']},
     externalId:nullableString,linkedPoIds:{type:'array',items:{type:'string'}},poDate:nullableString,expiryDate:nullableString,
-    appointmentId:nullableString,appointmentAt:nullableString,destination:nullableString,fcCode:nullableString,customer:nullableString,supplier:nullableString,currency:nullableString,
+    appointmentId:nullableString,appointmentAt:nullableString,destination:nullableString,fcCode:nullableString,sourceAddress:nullableString,destinationAddress:nullableString,sourceCity:nullableString,destinationCity:nullableString,sourceState:nullableString,destinationState:nullableString,sourcePostalCode:nullableString,destinationPostalCode:nullableString,facilityName:nullableString,customer:nullableString,supplier:nullableString,currency:nullableString,
     totalQuantity:nullableNumber,totalValue:nullableNumber,cartonCount:nullableNumber,
     lines:{type:'array',items:{type:'object',additionalProperties:false,properties:lineProperties,required:lineRequired}},
   },
-  required:['platform','kind','externalId','linkedPoIds','poDate','expiryDate','appointmentId','appointmentAt','destination','fcCode','customer','supplier','currency','totalQuantity','totalValue','cartonCount','lines'],
+    required:['platform','kind','externalId','linkedPoIds','poDate','expiryDate','appointmentId','appointmentAt','destination','fcCode','sourceAddress','destinationAddress','sourceCity','destinationCity','sourceState','destinationState','sourcePostalCode','destinationPostalCode','facilityName','customer','supplier','currency','totalQuantity','totalValue','cartonCount','lines'],
 };
 
 const SYSTEM_PROMPT=`Extract supply-chain document data exactly as written. Return only the requested JSON schema.
@@ -36,6 +36,8 @@ Map common purchase-order labels as follows:
 - "ORDER DATE" -> poDate; "Expiry Date" -> expiryDate.
 - "SUPPLIER NAME" -> supplier; "RETAILER NAME" -> customer.
 - "Shipped To Address", fulfilment-centre address, or FC code -> destination; extract fcCode separately when present.
+- Extract complete source/dispatch and destination/delivery addresses without shortening them. Also extract sourceCity, destinationCity, sourceState, destinationState, sourcePostalCode, destinationPostalCode, and facilityName when present.
+- Preserve the address exactly as written in sourceAddress and destinationAddress. Normalize only the city fields for matching; never invent a missing address component.
 - "Product ID" or channel SKU -> channelItemCode; "Ean" -> ean; "HSN/SAC Code" -> hsn.
 - "Quantity" -> ordered; "Approved Units" -> approved; "Pending Quantity" -> pending; "Supplier Unit Price" -> unitPrice; "Total Amount" -> total.
 Use the company/header names to identify the platform. A document headed FLIPKART INDIA PRIVATE LIMITED is platform FLIPKART.
@@ -86,13 +88,14 @@ export class OpenRouterExtractor {
     }finally{clearTimeout(timer)}
   }
 
-  private validate(value:unknown,text:string):NormalizedDocument{
+  private validate(value:any,text:string):NormalizedDocument{
     if(!this.record(value))throw new Error('invalid_schema');
-    const expected=['platform','kind','externalId','linkedPoIds','poDate','expiryDate','appointmentId','appointmentAt','destination','fcCode','customer','supplier','currency','totalQuantity','totalValue','cartonCount','lines'];
+    value={sourceAddress:null,destinationAddress:null,sourceCity:null,destinationCity:null,sourceState:null,destinationState:null,sourcePostalCode:null,destinationPostalCode:null,facilityName:null,...value};
+    const expected=['platform','kind','externalId','linkedPoIds','poDate','expiryDate','appointmentId','appointmentAt','destination','fcCode','sourceAddress','destinationAddress','sourceCity','destinationCity','sourceState','destinationState','sourcePostalCode','destinationPostalCode','facilityName','customer','supplier','currency','totalQuantity','totalValue','cartonCount','lines'];
     if(Object.keys(value).some(key=>!expected.includes(key))||expected.some(key=>!(key in value)))throw new Error('invalid_schema');
     const allowedPlatforms=['AMAZON_RK','FLIPKART','BLINKIT','UNKNOWN']; const allowedKinds=['PURCHASE_ORDER','APPOINTMENT','CONSIGNMENT','UNKNOWN'];
     if(!allowedPlatforms.includes(String(value.platform))||!allowedKinds.includes(String(value.kind)))throw new Error('invalid_schema');
-    const strings=['externalId','poDate','expiryDate','appointmentId','appointmentAt','destination','fcCode','customer','supplier','currency'];
+    const strings=['externalId','poDate','expiryDate','appointmentId','appointmentAt','destination','fcCode','sourceAddress','destinationAddress','sourceCity','destinationCity','sourceState','destinationState','sourcePostalCode','destinationPostalCode','facilityName','customer','supplier','currency'];
     if(strings.some(key=>value[key]!==null&&typeof value[key]!=='string'))throw new Error('invalid_schema');
     const numbers=['totalQuantity','totalValue','cartonCount'];
     if(numbers.some(key=>value[key]!==null&&(!Number.isFinite(value[key])||Number(value[key])<0)))throw new Error('invalid_schema');
@@ -107,11 +110,11 @@ export class OpenRouterExtractor {
     if(value.kind==='UNKNOWN')warnings.push('Document type could not be identified.');
     if(value.kind==='PURCHASE_ORDER'&&!value.externalId)warnings.push('Purchase order number was not found.');
     if(value.kind==='APPOINTMENT'&&!value.appointmentId)warnings.push('Appointment number was not found.');
-    if(!value.destination)warnings.push('Destination could not be extracted.');
+    if(!value.destination&&!value.destinationAddress)warnings.push('Destination could not be extracted.');
     if(value.kind==='PURCHASE_ORDER'&&!lines.length)warnings.push('Line items require manual review.');
-    const ordered=lines.reduce((sum,line)=>sum+Number(line.ordered||0),0);
+    const ordered=lines.reduce((sum:number,line:ExtractedLine)=>sum+Number(line.ordered||0),0);
     if(value.totalQuantity!==null&&ordered&&Math.abs(Number(value.totalQuantity)-ordered)>0.01)warnings.push('Header quantity does not match extracted line quantities.');
-    const checks=[value.platform!=='UNKNOWN',value.kind!=='UNKNOWN',Boolean(value.externalId||value.appointmentId),Boolean(value.destination),lines.length>0];
+    const checks=[value.platform!=='UNKNOWN',value.kind!=='UNKNOWN',Boolean(value.externalId||value.appointmentId),Boolean(value.destination||value.destinationAddress),lines.length>0];
     const confidence=Math.round(checks.filter(Boolean).length/checks.length*100)/100;
     return {...value,lines,warnings,confidence,text} as NormalizedDocument;
   }

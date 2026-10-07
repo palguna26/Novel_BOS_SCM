@@ -39,8 +39,22 @@ export function DocumentWorkflowModal({ apiBase, mode, po, onClose, onSaved }: P
       if (!upload.ok) throw new Error(document.message || 'Document upload failed');
       const endpoint = mode === 'appointment' ? `/api/pos/${po.id}/appointment` : mode === 'pod' ? `/api/pos/${po.id}/pods` : `/api/pos/${po.id}/invoice`;
       const shipmentLines = outstandingLines.map((line: any) => ({ shipmentLineId: line.shipmentLineId, ...(podLines[line.shipmentLineId] || {}) }));
+      const extracted = document.extracted || {};
+      const appointmentMatchDetails = {
+        sourceAddress: extracted.sourceAddress || null,
+        destinationAddress: extracted.destinationAddress || extracted.destination || null,
+        sourceCity: extracted.sourceCity || null,
+        destinationCity: extracted.destinationCity || null,
+        sourceState: extracted.sourceState || null,
+        destinationState: extracted.destinationState || null,
+        sourcePostalCode: extracted.sourcePostalCode || null,
+        destinationPostalCode: extracted.destinationPostalCode || null,
+        facilityName: extracted.facilityName || null,
+        fcCode: extracted.fcCode || null,
+        extractionConfidence: document.confidence ?? extracted.confidence ?? null,
+      };
       const payload = mode === 'appointment'
-        ? { documentVersionId: document.documentVersionId, appointmentId: fields.appointmentId || document.extracted?.appointmentId, appointmentAt: fields.appointmentAt || document.extracted?.appointmentAt, location: fields.location || document.extracted?.destination, matchStatus: 'MATCHED' }
+        ? { documentVersionId: document.documentVersionId, appointmentId: fields.appointmentId || extracted.appointmentId, appointmentAt: fields.appointmentAt || extracted.appointmentAt, location: fields.location || extracted.destinationAddress || extracted.destination, matchStatus: 'MATCHED', matchDetails: appointmentMatchDetails }
         : mode === 'pod'
           ? { documentVersionId: document.documentVersionId, receiver: fields.receiver, deliveryAt: fields.deliveryAt, lines: shipmentLines }
           : { documentVersionId: document.documentVersionId, number: fields.number || document.extracted?.externalId, invoiceDate: fields.invoiceDate, amount: Number(fields.amount), currency: 'INR', recipients: [] };

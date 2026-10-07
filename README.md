@@ -25,6 +25,8 @@ The API exposes document extraction at `POST /api/documents/extract`. PDF, XLSX,
 
 Document extraction uses OpenRouter first when `OPENROUTER_API_KEY` is configured. The default model is `openai/gpt-4o-mini`; override it with `OPENROUTER_MODEL`. Requests enforce structured output, zero-data-retention routing, and denied provider data collection. If OpenRouter is unavailable or returns invalid data, the API falls back to the deterministic normalizer and flags weak results for review.
 
+The read-only SCM Copilot uses the same `OPENROUTER_API_KEY` through `POST /api/copilot/ask`. Set `OPENROUTER_COPILOT_MODEL` to choose its model independently from document extraction. By default, the copilot does not force ZDR routing because some models have no ZDR endpoints; set `OPENROUTER_COPILOT_ZDR=true` or `OPENROUTER_COPILOT_DATA_COLLECTION=deny` when the selected model and OpenRouter account support those policies. It uses the signed-in user's permitted SCM data, returns grounded answers with tables/charts, logs the request in Audit Log, and supports CSV export from the Copilot panel.
+
 ## Validation
 
 Run `npm test` and `npm run build` in `apps/api`, then `npm run build` in `apps/web`. Run `supabase/tests/scm_v2_validation.sql` and `supabase/tests/scm_v2_workflow_smoke.sql` against a migrated test project.

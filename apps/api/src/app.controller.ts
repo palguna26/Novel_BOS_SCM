@@ -16,6 +16,8 @@ export class AppController {
 
   @Post('skus') sku(@Req() req: any, @Body() body: any) { return this.service.createSku(req.user, body); }
   @Post('skus/:id') updateSku(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateSku(req.user, id, body); }
+  @Post('platforms') platform(@Req() req: any, @Body() body: any) { return this.service.createPlatform(req.user, body); }
+  @Post('platforms/:id') updatePlatform(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updatePlatform(req.user, id, body); }
   @Post('warehouses') warehouse(@Req() req: any, @Body() body: any) { return this.service.createWarehouse(req.user, body); }
   @Post('warehouses/:id') updateWarehouse(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateWarehouse(req.user, id, body); }
   @Post('locations') location(@Req() req: any, @Body() body: any) { return this.service.createLocation(req.user, body); }

@@ -28,6 +28,15 @@ export interface NormalizedDocument {
   appointmentAt: string | null;
   destination: string | null;
   fcCode: string | null;
+  sourceAddress: string | null;
+  destinationAddress: string | null;
+  sourceCity: string | null;
+  destinationCity: string | null;
+  sourceState: string | null;
+  destinationState: string | null;
+  sourcePostalCode: string | null;
+  destinationPostalCode: string | null;
+  facilityName: string | null;
   customer: string | null;
   supplier: string | null;
   currency: string | null;
@@ -150,6 +159,24 @@ export function normalizeDocument(text:string):NormalizedDocument {
     /Ship To Address\s+Name\s+([^\n]+)/i,
     /Facility Name\s+([^\n]+)/i,
   ]);
+  const sourceAddress = first(cleaned,[
+    /Ship From Address\s*[:\n]+([\s\S]*?)(?=Ship To Address|Bill To Address|Destination FC|Appointment|$)/i,
+    /Dispatch From\s*[:\n]+([\s\S]*?)(?=Ship To Address|Destination|Appointment|$)/i,
+    /Source Warehouse Address\s*[:\n]+([\s\S]*?)(?=Destination|Appointment|$)/i,
+  ]);
+  const destinationAddress = first(cleaned,[
+    /Ship To Address\s*[:\n]+([\s\S]*?)(?=Bill To Address|Appointment|$)/i,
+    /Delivery Address\s*[:\n]+([\s\S]*?)(?=Appointment|$)/i,
+    /Destination Address\s*[:\n]+([\s\S]*?)(?=Appointment|$)/i,
+  ]) || destination;
+  const cityFromAddress = (address:string|null) => address?.match(/\b(Bengaluru|Bangalore|Mysuru|Mysore|Manesar|Gurugram|Gurgaon|Delhi|Mumbai|Pune|Hyderabad|Chennai|Kolkata)\b/i)?.[1] ?? null;
+  const sourceCity = first(cleaned,[/Source City\s*[:\-]\s*([^\n]+)/i,/Dispatch City\s*[:\-]\s*([^\n]+)/i]) || cityFromAddress(sourceAddress);
+  const destinationCity = first(cleaned,[/Destination City\s*[:\-]\s*([^\n]+)/i,/Ship To City\s*[:\-]\s*([^\n]+)/i]) || cityFromAddress(destinationAddress);
+  const sourceState = first(cleaned,[/Source State\s*[:\-]\s*([^\n]+)/i,/Dispatch State\s*[:\-]\s*([^\n]+)/i]);
+  const destinationState = first(cleaned,[/Destination State\s*[:\-]\s*([^\n]+)/i,/Ship To State\s*[:\-]\s*([^\n]+)/i]);
+  const sourcePostalCode = first(cleaned,[/Source[^\n]{0,20}(?:PIN|postal)\s*(?:code)?\s*[:\-]?\s*(\d{6})/i]);
+  const destinationPostalCode = first(cleaned,[/(?:Destination|Ship To|Delivery)[^\n]{0,20}(?:PIN|postal)\s*(?:code)?\s*[:\-]?\s*(\d{6})/i, /\b(\d{6})\b/]);
+  const facilityName = first(cleaned,[/Facility Name\s*[:\-]?\s*([^\n]+)/i,/Warehouse Name\s*[:\-]?\s*([^\n]+)/i]);
   const fcCode = first(cleaned,[
     /Destination FC\s*:\s*([A-Z0-9_-]+)/i,
     /Ship to location\s+([A-Z0-9_-]+)/i,
@@ -173,9 +200,9 @@ export function normalizeDocument(text:string):NormalizedDocument {
   if (kind === 'UNKNOWN') warnings.push('Document type could not be identified.');
   if (kind === 'PURCHASE_ORDER' && !externalId) warnings.push('Purchase order number was not found.');
   if (kind === 'APPOINTMENT' && !appointmentId) warnings.push('Appointment number was not found.');
-  if (!destination) warnings.push('Destination could not be extracted.');
+  if (!destination && !destinationAddress) warnings.push('Destination could not be extracted.');
   if (kind === 'PURCHASE_ORDER' && lines.length === 0) warnings.push('Line items require manual review.');
-  const checks = [platform !== 'UNKNOWN',kind !== 'UNKNOWN',!!(externalId||appointmentId),!!destination,lines.length>0];
+  const checks = [platform !== 'UNKNOWN',kind !== 'UNKNOWN',!!(externalId||appointmentId),!!(destination||destinationAddress),lines.length>0];
   const confidence = Math.round((checks.filter(Boolean).length/checks.length)*100)/100;
 
   return {
@@ -184,7 +211,7 @@ export function normalizeDocument(text:string):NormalizedDocument {
     expiryDate:first(cleaned,[/R\.O\. expiry\s*date\s*:\s*([^\n]+)/i,/Expiry Date\s+([^\n]+)/i]),
     appointmentId,
     appointmentAt:first(cleaned,[/Appointment Time\s*:\s*([^\n]+)/i,/Reporting date and time\s+([^\n]+)/i]),
-    destination,fcCode,
+    destination,fcCode,sourceAddress,destinationAddress,sourceCity,destinationCity,sourceState,destinationState,sourcePostalCode,destinationPostalCode,facilityName,
     customer:first(cleaned,[/Purchasing entity\s+([^\n]+)/i,/RETAILER NAME\s+([^\n]+)/i,/Issued by\s+([^\n]+)/i]),
     supplier:first(cleaned,[/Supplier Name\s+([^\n]+)/i,/SELLER\s*:\s*([^\n]+)/i,/Vendor\s+([A-Z0-9-]+)/i]),
     currency:first(cleaned,[/Currency\s*:\s*([A-Z]{3})/i]) ?? (totalValue !== null ? 'INR' : null),
