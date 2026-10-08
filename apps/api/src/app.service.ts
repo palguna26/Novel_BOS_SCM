@@ -113,6 +113,13 @@ export class AppService {
       const poShipments = shipments.filter(x => x.purchase_order_id === po.id).map(shipment => ({
         ...shipment,
         number: shipment.shipment_number,
+        sourceAddress: shipment.source_address || po.source_address || null,
+        sourceCity: shipment.source_city || po.source_city || sites.find(x => x.id === shipment.source_site_id)?.city || null,
+        destinationAddress: shipment.destination_address || po.destination_address || po.destination_name || null,
+        destinationCity: shipment.destination_city || po.destination_city || null,
+        destinationState: shipment.destination_state || po.destination_state || null,
+        destinationPostalCode: shipment.destination_postal_code || po.destination_postal_code || null,
+        destinationCode: shipment.destination_code || po.destination_key || null,
         truckNumber: shipment.truck_number,
         driverName: shipment.driver_name,
         driverPhone: shipment.driver_phone,

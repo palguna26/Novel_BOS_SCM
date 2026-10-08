@@ -1722,7 +1722,9 @@ function Details({
           <div className="grid grid-cols-2 gap-4 mt-6">
             {[
               ["Source address", po.appointment?.sourceAddress || po.sourceAddress || po.warehouse?.address || "Not extracted"],
+              ["Source city", po.appointment?.sourceCity || po.sourceCity || po.warehouse?.city || "Not resolved"],
               ["Destination address", po.appointment?.destinationAddress || po.destinationAddress || po.destination],
+              ["Destination city / FC", po.appointment?.destinationCity || po.destinationCity || po.destination || "Not resolved"],
               ["Warehouse", po.warehouse?.name || "Mapping required"],
               ["Customer", po.customer || "â€”"],
               ["PO value", `â‚¹ ${po.totalValue || 0}`],
@@ -1779,6 +1781,19 @@ function Details({
             </button>
           </div>
         )}
+        {(po.shipments || []).length > 0 && <>
+          <h3 className="font-semibold mt-8 mb-3">Shipment routes</h3>
+          <div className="space-y-3">
+            {(po.shipments || []).map((shipment: any) => <div className="rounded-xl border border-slate-100 p-4 text-sm" key={shipment.id}>
+              <div className="flex items-center justify-between"><span className="mono font-semibold">{shipment.number}</span><Badge tone="blue">{shipment.status?.replaceAll("_", " ")}</Badge></div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                <div><div className="text-slate-400">Source</div><div className="mt-1 font-medium">{shipment.sourceCity || po.sourceCity || "—"}</div><div className="mt-1 text-slate-500">{shipment.sourceAddress || po.sourceAddress || "Address not supplied"}</div></div>
+                <div><div className="text-slate-400">Destination</div><div className="mt-1 font-medium">{shipment.destinationCode || shipment.destinationCity || po.destination || "—"}</div><div className="mt-1 text-slate-500">{shipment.destinationAddress || po.destinationAddress || "Address not supplied"}</div></div>
+              </div>
+              <div className="mt-3 text-xs text-slate-500">Expected arrival: {shipment.expectedArrival || shipment.expected_arrival_at || "Route time not set"}</div>
+            </div>)}
+          </div>
+        </>}
         <h3 className="font-semibold mt-8 mb-3">Operational next steps</h3>
         <div className="space-y-3">
           <div className="flex gap-3 items-center p-3 rounded-xl bg-slate-50">
