@@ -178,7 +178,7 @@ export class AppService {
 
   async masters(user: AuthenticatedUser) {
     const companyId = user.companyId;
-    const [platforms, warehouses, skus, mappings, itemIdentifiers, routes, locations, uoms] = await Promise.all([
+    const [platforms, sites, skus, mappings, itemIdentifiers, routes, locations, uoms] = await Promise.all([
       this.rows('master_data', 'channels', companyId),
       this.rows('master_data', 'sites', companyId),
       this.rows('master_data', 'items', companyId),
@@ -188,6 +188,7 @@ export class AppService {
       this.rows('master_data', 'locations', companyId),
       this.sb.schema('master_data').from('uoms').select('*').eq('active', true),
     ]);
+    const warehouses = (sites || []).filter((site: Row) => site.site_type === 'WAREHOUSE');
     return { platforms, warehouses, skus, mappings, itemIdentifiers, routes, locations, uoms: this.result(uoms.data, uoms.error) || [] };
   }
 
@@ -197,7 +198,9 @@ export class AppService {
       this.rows('master_data', 'items', user.companyId),
       this.rows('master_data', 'sites', user.companyId),
     ]);
-    return rows.map(row => ({
+    return rows
+      .filter(row => sites.find(site => site.id === row.site_id && site.site_type === 'WAREHOUSE' && site.active !== false))
+      .map(row => ({
       ...row,
       skuId: row.item_id,
       warehouseId: row.site_id,
