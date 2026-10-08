@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ExtractedLine, NormalizedDocument } from './document-extractor';
+import { ExtractedLine, NormalizedDocument, mergeDocumentFallback, normalizeDocument } from './document-extractor';
 
 type Usage = { prompt_tokens?:number; completion_tokens?:number; total_tokens?:number; cost?:number };
 export type ExtractionMetadata = {
@@ -59,7 +59,9 @@ export class OpenRouterExtractor {
     for(let attempt=1;attempt<=2;attempt++){
       try{
         const response=await this.request(input);
-        return {document:this.validate(response.content,input.text),metadata:{method:'openrouter',model:response.model||this.model,provider:response.provider,attempts:attempt,latencyMs:Date.now()-started,usage:response.usage}};
+        const aiDocument = this.validate(response.content,input.text);
+        const ruleDocument = normalizeDocument(input.text);
+        return {document:mergeDocumentFallback(aiDocument,ruleDocument),metadata:{method:'openrouter',model:response.model||this.model,provider:response.provider,attempts:attempt,latencyMs:Date.now()-started,usage:response.usage}};
       }catch(error){lastError=error;}
     }
     throw new Error(`openrouter_failed:${lastError instanceof Error?lastError.message:'unknown_error'}`);

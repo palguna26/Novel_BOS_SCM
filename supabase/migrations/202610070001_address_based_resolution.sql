@@ -78,8 +78,8 @@ declare
   v_old_id uuid;
   v_appointment_id uuid;
   v_result jsonb;
-  v_source_site_id uuid;
-  v_source_location_id uuid;
+  v_source_site_id uuid := nullif(p_match_details->>'sourceWarehouseId', '')::uuid;
+  v_source_location_id uuid := nullif(p_match_details->>'sourceLocationId', '')::uuid;
   v_source_city text := nullif(trim(p_match_details->>'sourceCity'), '');
   v_destination_city text := nullif(trim(p_match_details->>'destinationCity'), '');
   v_source_address text := nullif(trim(p_match_details->>'sourceAddress'), '');
@@ -108,9 +108,24 @@ begin
   v_existing := platform.claim_idempotency(v_po.company_id, 'RECORD_APPOINTMENT', p_idempotency_key);
   if v_existing is not null then return v_existing; end if;
 
-  v_source_site_id := master_data.resolve_warehouse_city(v_po.company_id, v_source_city);
   if v_source_site_id is not null then
-    select id into v_source_location_id from master_data.locations where company_id = v_po.company_id and site_id = v_source_site_id and active and location_type = 'WAREHOUSE' order by created_at limit 1;
+    if not exists (select 1 from master_data.sites where id = v_source_site_id and company_id = v_po.company_id and site_type = 'WAREHOUSE' and active) then raise exception 'Selected source warehouse is invalid or inactive'; end if;
+    if v_source_location_id is null then
+      select id into v_source_location_id from master_data.locations where company_id = v_po.company_id and site_id = v_source_site_id and active and not virtual and location_type = 'WAREHOUSE' order by created_at limit 1;
+    elsif not exists (select 1 from master_data.locations where id = v_source_location_id and company_id = v_po.company_id and site_id = v_source_site_id and active and not virtual) then raise exception 'Selected stock location is invalid or inactive'; end if;
+  else
+    v_source_site_id := master_data.resolve_warehouse_city(v_po.company_id, v_source_city);
+    -- Some appointment PDFs only contain the destination FC and appointment
+    -- details. If the PO already has a confirmed source route, use it instead
+    -- of forcing the appointment into manual warehouse review.
+    if v_source_site_id is null and v_source_city is null
+      and v_po.source_site_id is not null and v_po.source_location_id is not null then
+      v_source_site_id := v_po.source_site_id;
+      v_source_location_id := v_po.source_location_id;
+    end if;
+    if v_source_site_id is not null then
+      select id into v_source_location_id from master_data.locations where company_id = v_po.company_id and site_id = v_source_site_id and active and not virtual and location_type = 'WAREHOUSE' order by created_at limit 1;
+    end if;
   end if;
   if v_source_site_id is not null and v_po.source_site_id is not null and v_po.source_site_id <> v_source_site_id then
     v_source_conflict := true;

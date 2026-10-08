@@ -662,6 +662,7 @@ begin
   if exists (
     select 1 from scm.purchase_orders
     where company_id = v_company_id and channel_id = v_channel_id and external_id = p_payload->>'externalId'
+      and status not in ('CANCELLED','CLOSED')
   ) then raise exception 'Duplicate channel purchase order'; end if;
 
   select dm.* into v_mapping

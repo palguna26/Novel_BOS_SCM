@@ -22,13 +22,24 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
 }
 @Injectable() export class DocumentService {
  constructor(private storage:SupabaseDocumentStorage,private supabase:SupabaseService,private openRouter:OpenRouterExtractor){}
+ async previewAndExtract(name:string,data:Buffer,user?:any,mediaType='application/octet-stream',extractedText?:string){
+  this.validateUpload(name,data,mediaType); let text=extractedText||'';
+  if(!text&&name.toLowerCase().endsWith('.pdf')){try{const pdfjs:any=await import('pdfjs-dist/legacy/build/pdf.mjs'); const pdf=await pdfjs.getDocument({data:new Uint8Array(data)}).promise; for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i); const c=await page.getTextContent(); text+=this.pageText(c.items||[])+'\n';}}catch{ text=''; }}
+  const extractionStarted=Date.now(); let extracted; let extraction:ExtractionMetadata;
+  if(this.openRouter.isConfigured()){
+   try{const ai=await this.openRouter.extract({name,data,mediaType,text});extracted=ai.document;extraction=ai.metadata;}
+   catch(error){extracted=normalizeDocument(text);extracted.confidence=Math.min(extracted.confidence,0.8);extraction={method:'rules',attempts:2,latencyMs:Date.now()-extractionStarted,fallbackReason:error instanceof Error?error.message:'openrouter_failed'};}
+  }else{extracted=normalizeDocument(text);extracted.confidence=Math.min(extracted.confidence,0.8);extraction={method:'rules',attempts:0,latencyMs:Date.now()-extractionStarted,fallbackReason:'openrouter_not_configured'};}
+  extracted=await this.resolveSkuItems(extracted,user);
+  return {filename:name,extracted,confidence:extracted.confidence,warnings:extracted.warnings,extraction};
+ }
  async saveAndExtract(name:string,data:Buffer,user?:any,idempotencyKey?:string,mediaType='application/octet-stream',extractedText?:string){this.validateUpload(name,data,mediaType);const file=await this.storage.save(name,data,mediaType,user?.companyId); let text=extractedText||'';
   if(!text&&name.toLowerCase().endsWith('.pdf')){try{const pdfjs:any=await import('pdfjs-dist/legacy/build/pdf.mjs'); const pdf=await pdfjs.getDocument({data:new Uint8Array(data)}).promise; for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i); const c=await page.getTextContent(); text+=this.pageText(c.items||[])+'\n';}}catch{ text=''; }}
   const extractionStarted=Date.now(); let extracted; let extraction:ExtractionMetadata;
   if(this.openRouter.isConfigured()){
    try{const ai=await this.openRouter.extract({name,data,mediaType,text});extracted=ai.document;extraction=ai.metadata;}
-   catch(error){extracted=normalizeDocument(text);extraction={method:'rules',attempts:2,latencyMs:Date.now()-extractionStarted,fallbackReason:error instanceof Error?error.message:'openrouter_failed'};}
-  }else{extracted=normalizeDocument(text);extraction={method:'rules',attempts:0,latencyMs:Date.now()-extractionStarted,fallbackReason:'openrouter_not_configured'};}
+   catch(error){extracted=normalizeDocument(text);extracted.confidence=Math.min(extracted.confidence,0.8);extraction={method:'rules',attempts:2,latencyMs:Date.now()-extractionStarted,fallbackReason:error instanceof Error?error.message:'openrouter_failed'};}
+  }else{extracted=normalizeDocument(text);extracted.confidence=Math.min(extracted.confidence,0.8);extraction={method:'rules',attempts:0,latencyMs:Date.now()-extractionStarted,fallbackReason:'openrouter_not_configured'};}
   extracted = await this.resolveSkuItems(extracted, user);
   const sha256=this.hash(data);
   let registration:any=null;
@@ -64,10 +75,10 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
    };
   } catch { return extracted; }
  }
- private validateUpload(name:string,data:Buffer,mediaType:string){
+  private validateUpload(name:string,data:Buffer,mediaType:string){
   const ext=path.extname(name).toLowerCase();
-  const allowed:Record<string,string[]>={'.pdf':['application/pdf'],'.xlsx':['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/zip'],'.csv':['text/csv','application/csv','text/plain','application/vnd.ms-excel'],'.docx':['application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/zip']};
-  if(!allowed[ext])throw new BadRequestException('Unsupported file type. Choose PDF, XLSX, CSV, or DOCX.');
+  const allowed:Record<string,string[]>={'.pdf':['application/pdf'],'.xlsx':['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/zip'],'.csv':['text/csv','application/csv','text/plain','application/vnd.ms-excel'],'.docx':['application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/zip'],'.jpg':['image/jpeg'],'.jpeg':['image/jpeg'],'.png':['image/png']};
+  if(!allowed[ext])throw new BadRequestException('Unsupported file type. Choose PDF, XLSX, CSV, DOCX, JPG, JPEG, or PNG.');
   if(mediaType&&mediaType!=='application/octet-stream'&&!allowed[ext].includes(mediaType))throw new BadRequestException('The file type does not match its extension.');
   const header=data.subarray(0,8);
   if(ext==='.pdf'&&header.subarray(0,5).toString()!=='%PDF-')throw new BadRequestException('The file content does not match its extension.');
@@ -78,6 +89,8 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
    if(encryptedOffice&&mediaType!==allowed[ext][0])throw new BadRequestException('The file type does not match its extension.');
    if(zip){const archive=data.toString('latin1'); const expected=ext==='.xlsx'?'xl/':'word/';if(!archive.includes(expected))throw new BadRequestException('The file content does not match its extension.');}
   }
+  if((ext==='.jpg'||ext==='.jpeg')&&!(header[0]===0xff&&header[1]===0xd8&&header[2]===0xff))throw new BadRequestException('The file content does not match its extension.');
+  if(ext==='.png'&&header.subarray(0,8).compare(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))!==0)throw new BadRequestException('The file content does not match its extension.');
   if(ext==='.csv'&&data.includes(0))throw new BadRequestException('The CSV file must contain text.');
  }
  private pageText(items:any[]){

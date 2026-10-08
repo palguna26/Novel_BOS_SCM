@@ -24,19 +24,33 @@ function inlineMarkdown(value: string) {
 
 function MarkdownAnswer({ text }: { text: string }) {
   const lines = text.replace(/\r/g, "").split("\n");
-  return <div className="text-sm leading-6 space-y-2">
-    {lines.map((line, index) => {
-      if (!line.trim()) return <div key={index} className="h-1" />;
-      if (line.startsWith("### ")) return <h4 key={index} className="font-semibold text-base mt-3">{inlineMarkdown(line.slice(4))}</h4>;
-      if (line.startsWith("## ")) return <h3 key={index} className="font-semibold text-lg mt-3">{inlineMarkdown(line.slice(3))}</h3>;
-      if (line.startsWith("# ")) return <h2 key={index} className="font-semibold text-xl mt-3">{inlineMarkdown(line.slice(2))}</h2>;
-      if (/^[-*] /.test(line)) return <div key={index} className="flex gap-2 pl-2"><span className="text-emerald-700">•</span><span>{inlineMarkdown(line.slice(2))}</span></div>;
-      if (/^\d+\. /.test(line)) return <div key={index} className="pl-2">{inlineMarkdown(line)}</div>;
-      if (line.startsWith("> ")) return <blockquote key={index} className="border-l-2 border-emerald-500 pl-3 text-slate-600">{inlineMarkdown(line.slice(2))}</blockquote>;
-      if (line.startsWith("|")) return <div key={index} className="font-mono text-xs overflow-x-auto whitespace-pre">{line}</div>;
-      return <p key={index}>{inlineMarkdown(line)}</p>;
-    })}
-  </div>;
+  const tableRow = (line: string) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(cell => cell.trim());
+  const tableSeparator = (line: string) => tableRow(line).every(cell => /^:?-{3,}:?$/.test(cell));
+  const blocks: any[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim().startsWith("|") && tableSeparator(lines[index + 1] || "")) {
+      const header = tableRow(line);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && lines[index].trim().startsWith("|")) {
+        rows.push(tableRow(lines[index]));
+        index += 1;
+      }
+      index -= 1;
+      blocks.push(<div key={`table-${index}`} className="overflow-x-auto rounded-lg border border-slate-200"><table className="w-full text-xs"><thead className="bg-slate-50"><tr>{header.map((cell, cellIndex) => <th key={cellIndex} className="px-3 py-2 text-left font-semibold text-slate-600 border-b border-slate-200 whitespace-nowrap">{inlineMarkdown(cell)}</th>)}</tr></thead><tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{header.map((_, cellIndex) => <td key={cellIndex} className="px-3 py-2 border-b border-slate-100 whitespace-nowrap">{inlineMarkdown(row[cellIndex] || "")}</td>)}</tr>)}</tbody></table></div>);
+      continue;
+    }
+    if (!line.trim()) blocks.push(<div key={index} className="h-1" />);
+    else if (line.startsWith("### ")) blocks.push(<h4 key={index} className="font-semibold text-base mt-3">{inlineMarkdown(line.slice(4))}</h4>);
+    else if (line.startsWith("## ")) blocks.push(<h3 key={index} className="font-semibold text-lg mt-3">{inlineMarkdown(line.slice(3))}</h3>);
+    else if (line.startsWith("# ")) blocks.push(<h2 key={index} className="font-semibold text-xl mt-3">{inlineMarkdown(line.slice(2))}</h2>);
+    else if (/^[-*] /.test(line)) blocks.push(<div key={index} className="flex gap-2 pl-2"><span className="text-emerald-700">•</span><span>{inlineMarkdown(line.slice(2))}</span></div>);
+    else if (/^\d+\. /.test(line)) blocks.push(<div key={index} className="pl-2">{inlineMarkdown(line)}</div>);
+    else if (line.startsWith("> ")) blocks.push(<blockquote key={index} className="border-l-2 border-emerald-500 pl-3 text-slate-600">{inlineMarkdown(line.slice(2))}</blockquote>);
+    else blocks.push(<p key={index}>{inlineMarkdown(line)}</p>);
+  }
+  return <div className="text-sm leading-6 space-y-2">{blocks}</div>;
 }
 
 function printPdf(answer: string, generatedAt?: string) {
@@ -77,10 +91,10 @@ export function CopilotPanel({ api, page, context, onClose }: Props) {
     finally { setBusy(false); }
   }
 
-  return <div className="fixed inset-y-0 right-0 z-30 w-[min(560px,100vw)] bg-white shadow-2xl border-l border-slate-200 flex flex-col">
+  return <div role="dialog" aria-modal="true" aria-label="SCM Copilot" className="fixed inset-y-0 right-0 z-30 w-[min(560px,100vw)] bg-white shadow-2xl border-l border-slate-200 flex flex-col">
     <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
       <div><div className="flex items-center gap-2 font-semibold"><MessageCircle size={18} className="text-emerald-700" /> SCM Copilot</div><div className="text-xs text-slate-400 mt-1">Read-only · grounded in your permitted data</div></div>
-      <button onClick={onClose} className="text-slate-400 hover:text-ink"><X size={20} /></button>
+      <button aria-label="Close Copilot" onClick={onClose} className="min-h-10 min-w-10 text-slate-400 hover:text-ink"><X size={20} /></button>
     </div>
     <div className="flex-1 overflow-auto p-6">
       {!result && !busy && <><div className="text-sm text-slate-500 mb-4">Ask about operations, exceptions, inventory, shipments, or reports.</div><div className="space-y-2">{suggestions.map(item => <button key={item} onClick={() => ask(item)} className="block w-full text-left rounded-xl border border-slate-200 px-4 py-3 text-sm hover:border-emerald-400 hover:bg-emerald-50">{item}</button>)}</div></>}

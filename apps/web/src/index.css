@@ -11,6 +11,8 @@
   --color-warehouse: #176b57;
   --color-warning: #b7791f;
   --color-info: #356b8c;
+  --radius-panel: 1rem;
+  --shadow-panel: 0 1px 2px rgb(20 33 31 / 0.04);
 }
 
 :root {
@@ -26,6 +28,23 @@ body { margin: 0; min-width: 320px; background: #f4f5f2; color: #14211f; }
 button, input, select, textarea { font: inherit; }
 button { transition: background-color 160ms ease-out, border-color 160ms ease-out, color 160ms ease-out, transform 160ms ease-out; }
 button:active { transform: translateY(1px); }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid #75c9ad;
+  outline-offset: 2px;
+}
+.panel { border-radius: var(--radius-panel); border: 1px solid #e8ece9; background: #fff; box-shadow: var(--shadow-panel); }
+.app-sidebar { flex: 0 0 16rem; }
+.app-content { width: min(100%, 1500px); }
+.app-header { min-height: 5rem; }
+.mobile-only { display: none; }
 .mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
 
 ::selection { background: #c9e7dc; color: #14211f; }
+
+@media (max-width: 767px) {
+  .app-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; width: 18rem; transform: translateX(-100%); transition: transform 180ms ease-out; }
+  .app-sidebar.is-open { transform: translateX(0); }
+  .mobile-only { display: inline-flex; }
+  .app-header { min-height: 4.5rem; }
+  .app-content { padding: 1.25rem 1rem !important; }
+}

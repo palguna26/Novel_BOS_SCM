@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { normalizeDocument } from './document-extractor';
+import { mergeDocumentFallback, normalizeDocument } from './document-extractor';
 
 describe('normalizeDocument',()=>{
   it('normalizes an Amazon appointment',()=>{
@@ -16,6 +16,18 @@ Appointment Id : 998424004985`);
     expect(result.linkedPoIds).toContain('4S2BJXYY');
   });
 
+  it('normalizes common appointment number labels',()=>{
+    const result=normalizeDocument(`Amazon Vendor Central
+Appointment Number: APT-4455
+Appointment Date and Time: 2026-10-07T09:30:00+05:30
+Facility: BLR4
+PO Number: 4S2BJXYY`);
+    expect(result.kind).toBe('APPOINTMENT');
+    expect(result.appointmentId).toBe('APT-4455');
+    expect(result.appointmentAt).toContain('2026-10-07T09:30:00');
+    expect(result.destination).toBe('BLR4');
+  });
+
   it('normalizes an Amazon purchase order',()=>{
     const result=normalizeDocument(`PO: 4S2BJXYY
 Status Confirmed
@@ -29,6 +41,19 @@ B0H8DSTSQT SKU: BABY-DIAPER-S
 Delivery window 09/10/2026 143 0 143 0 143 329.27 INR`);
     expect(result).toMatchObject({platform:'AMAZON_RK',kind:'PURCHASE_ORDER',externalId:'4S2BJXYY',fcCode:'BLR4'});
     expect(result.lines[0]).toMatchObject({asin:'B0H8DSTSQT',ordered:143,approved:143});
+  });
+
+  it('fills missing AI quantities from the PDF table parser',()=>{
+    const fallback=normalizeDocument(`PO: 4S2BJXYY
+Status Confirmed
+Ship to location BLR4 - BENGALURU, KARNATAKA
+PO items (1)
+B0H8DSTSQT SKU: BABY-DIAPER-S
+33073090
+Delivery window 09/10/2026 143 0 143 0 143 329.27 INR`);
+    const ai={...fallback, lines:[{...fallback.lines[0], ordered:null, approved:null}]} as any;
+    const merged=mergeDocumentFallback(ai,fallback);
+    expect(merged.lines[0]).toMatchObject({asin:'B0H8DSTSQT',ordered:143,approved:143});
   });
 
   it('normalizes a Flipkart consignment',()=>{

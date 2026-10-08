@@ -13,8 +13,8 @@ declare
   v_company_id uuid := (p_payload->>'companyId')::uuid;
   v_channel_id uuid := (p_payload->>'channelId')::uuid;
   v_mapping record;
-  v_source_site_id uuid;
-  v_source_location_id uuid;
+  v_source_site_id uuid := nullif(p_payload->>'sourceWarehouseId', '')::uuid;
+  v_source_location_id uuid := nullif(p_payload->>'sourceLocationId', '')::uuid;
   v_source_city text := nullif(trim(p_payload->>'sourceCity'), '');
   v_destination_city text := nullif(trim(p_payload->>'destinationCity'), '');
   v_po_id uuid;
@@ -31,9 +31,14 @@ begin
   if not iam.actor_can_write(p_actor_id, v_company_id) then raise exception 'Actor cannot create a PO for this company'; end if;
   select result into v_existing from platform.idempotency_keys where company_id = v_company_id and operation = 'CREATE_PURCHASE_ORDER' and idempotency_key = p_idempotency_key;
   if found and v_existing is not null then return v_existing; end if;
-  if exists (select 1 from scm.purchase_orders where company_id = v_company_id and channel_id = v_channel_id and external_id = p_payload->>'externalId') then raise exception 'Duplicate channel purchase order'; end if;
+  if exists (select 1 from scm.purchase_orders where company_id = v_company_id and channel_id = v_channel_id and external_id = p_payload->>'externalId' and status not in ('CANCELLED','CLOSED')) then raise exception 'Duplicate channel purchase order'; end if;
 
-  if v_source_city is not null then
+  if v_source_site_id is not null then
+    if not exists (select 1 from master_data.sites where id = v_source_site_id and company_id = v_company_id and site_type = 'WAREHOUSE' and active) then raise exception 'Selected source warehouse is invalid or inactive'; end if;
+    if v_source_location_id is null then
+      select id into v_source_location_id from master_data.locations where company_id = v_company_id and site_id = v_source_site_id and active and not virtual and location_type = 'WAREHOUSE' order by created_at limit 1;
+    elsif not exists (select 1 from master_data.locations where id = v_source_location_id and company_id = v_company_id and site_id = v_source_site_id and active and not virtual) then raise exception 'Selected stock location is invalid or inactive'; end if;
+  elsif v_source_city is not null then
     v_source_site_id := master_data.resolve_warehouse_city(v_company_id, v_source_city);
     if v_source_site_id is not null then
       select id into v_source_location_id from master_data.locations where company_id = v_company_id and site_id = v_source_site_id and active and location_type = 'WAREHOUSE' order by created_at limit 1;

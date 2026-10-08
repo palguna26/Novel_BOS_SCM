@@ -1,5 +1,5 @@
-export const DOCUMENT_ACCEPT = '.pdf,.xlsx,.csv,.docx,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-export const DOCUMENT_FORMATS = 'PDF, XLSX, CSV, or DOCX';
+export const DOCUMENT_ACCEPT = '.pdf,.xlsx,.csv,.docx,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png';
+export const DOCUMENT_FORMATS = 'PDF, XLSX, CSV, DOCX, JPG, JPEG, or PNG';
 export const MAX_DOCUMENT_SIZE = 10 * 1024 * 1024;
 
 const mimeTypes: Record<string, string[]> = {
@@ -7,6 +7,9 @@ const mimeTypes: Record<string, string[]> = {
   xlsx: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/zip'],
   csv: ['text/csv', 'application/csv', 'text/plain', 'application/vnd.ms-excel'],
   docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'],
+  jpg: ['image/jpeg'],
+  jpeg: ['image/jpeg'],
+  png: ['image/png'],
 };
 
 function extension(file: File) {
@@ -78,7 +81,8 @@ export async function prepareDocumentUpload(file: File) {
     if (ext === 'pdf') extractedText = await parsePdf(data);
     else if (ext === 'xlsx') extractedText = await parseXlsx(data);
     else if (ext === 'csv') extractedText = await parseCsv(new TextDecoder('utf-8', { fatal: true }).decode(data));
-    else extractedText = (await (await import('mammoth')).extractRawText({ arrayBuffer: data })).value;
+    else if (ext === 'docx') extractedText = (await (await import('mammoth')).extractRawText({ arrayBuffer: data })).value;
+    else warning = 'Image uploaded. Complete the appointment or document fields manually.';
     if (!extractedText.trim()) warning = 'No text could be extracted. Complete the fields manually.';
   } catch {
     warning = 'This file could not be read. It will be saved for manual review.';

@@ -32,6 +32,7 @@ import {
   Mail,
   UserRound,
   MessageCircle,
+  Menu,
 } from "lucide-react";
 import "./index.css";
 import { Button as UiButton } from "./components/ui/button";
@@ -55,6 +56,7 @@ import {
   prepareDocumentUpload,
   validateDocumentFile,
 } from "./lib/document-upload";
+import { emptyPoFilters, filterPos, type PoFilters } from "./lib/po-search";
 const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
 type User = { id: string; name: string; email: string; role: string };
 type PO = any;
@@ -84,7 +86,12 @@ async function api(path: string, opts: RequestInit = {}) {
       ...opts.headers,
     },
   });
-  let r = await request();
+  let r: Response;
+  try {
+    r = await request();
+  } catch {
+    throw new Error("API is unavailable. Start the SCM API service on port 4000.");
+  }
   if (r.status === 401 && !endpoint.startsWith("/auth/") && await refreshSession()) r = await request();
   if (!r.ok)
     throw new Error(
@@ -186,6 +193,9 @@ const nav = [
   ["Administration", Settings],
   ["Audit Log", Activity],
 ] as const;
+function WorkspaceLoading() {
+  return <div role="status" aria-live="polite" className="panel flex min-h-48 items-center justify-center p-8 text-sm text-slate-500"><div className="flex items-center gap-3"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-600" /> Loading workspace data…</div></div>;
+}
 function Badge({ children, tone = "slate" }: { children: any; tone?: string }) {
   const m: any = {
     green: "bg-emerald-100 text-emerald-700",
@@ -208,7 +218,11 @@ function App() {
     [data, setData] = useState<any>({}),
     [selected, setSelected] = useState<PO | null>(null),
     [toast, setToast] = useState(""),
-    [copilotOpen, setCopilotOpen] = useState(false);
+    [copilotOpen, setCopilotOpen] = useState(false),
+    [globalSearch, setGlobalSearch] = useState(""),
+    [mobileNavOpen, setMobileNavOpen] = useState(false),
+    [loading, setLoading] = useState(false),
+    [dataError, setDataError] = useState("");
   useEffect(() => {
     const t = localStorage.getItem("scm_token");
     if (t)
@@ -218,6 +232,8 @@ function App() {
   }, []);
   useEffect(() => {
     if (user) {
+      setLoading(true);
+      setDataError("");
       localStorage.setItem("scm_user", JSON.stringify(user));
       Promise.all([
         api("/dashboard"),
@@ -229,7 +245,11 @@ function App() {
         .then(([dashboard, pos, inventory, transactions, masters]) =>
           setData({ dashboard, pos, inventory, transactions, masters }),
         )
-        .catch((e) => setToast(e.message));
+        .catch((e) => {
+          setDataError(e.message || "Unable to load workspace data.");
+          setToast(e.message);
+        })
+        .finally(() => setLoading(false));
     }
   }, [user, page]);
   if (!user)
@@ -257,7 +277,7 @@ function App() {
     });
     setToast("Saved successfully");
   };
-  const action = async (path: string, body?: any) => {
+  const action = async (path: string, body?: any, onError?: (message: string) => void) => {
     try {
       await api(path, {
         method: "POST",
@@ -269,12 +289,20 @@ function App() {
       return true;
     } catch (e: any) {
       setToast(e.message);
+      onError?.(e.message);
       return false;
     }
   };
+  const operationalMasters = data.masters ? {
+    ...data.masters,
+    platforms: (data.masters.platforms || []).filter((x: any) => x.active !== false),
+    warehouses: (data.masters.warehouses || []).filter((x: any) => x.active !== false),
+    locations: (data.masters.locations || []).filter((x: any) => x.active !== false),
+  } : {};
   return (
     <div className="min-h-screen flex">
-      <aside className="w-64 bg-ink text-white p-5 flex flex-col">
+      {mobileNavOpen && <button aria-label="Close navigation" className="fixed inset-0 z-30 bg-ink/50 md:hidden" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={`app-sidebar bg-ink text-white p-5 flex flex-col ${mobileNavOpen ? "is-open" : ""}`}>
         <div className="text-xs font-bold tracking-[.24em] text-emerald-300 px-3 py-4">
           NOVEL SCM
         </div>
@@ -282,7 +310,7 @@ function App() {
           {nav.map(([name, Icon]) => (
             <button
               key={name}
-              onClick={() => setPage(name)}
+              onClick={() => { setPage(name); setMobileNavOpen(false); }}
               className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm ${page === name ? "bg-white/10 text-white" : "text-slate-400 hover:bg-white/5"}`}
             >
               <Icon size={17} />
@@ -312,37 +340,46 @@ function App() {
         </div>
       </aside>
       <main className="flex-1 min-w-0">
-        <header className="h-20 bg-white border-b border-slate-200 px-10 flex items-center justify-between">
-          <div>
-            <div className="text-xs uppercase tracking-widest text-slate-400">
+        <header className="app-header bg-white border-b border-slate-200 px-4 md:px-10 flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <button aria-label="Open navigation" className="mobile-only min-h-10 min-w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-600" onClick={() => setMobileNavOpen(true)}>
+              <Menu size={18} />
+            </button>
+            <div>
+            <div className="hidden text-xs uppercase tracking-widest text-slate-400 sm:block">
               Operations workspace
             </div>
-            <h1 className="text-xl font-semibold mt-1">{page}</h1>
+            <h1 className="mt-1 truncate text-lg font-semibold md:text-xl">{page}</h1>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="relative">
+          <div className="flex shrink-0 items-center gap-2 md:gap-4">
+            {page === "PO Inbox" && <div className="relative hidden sm:block">
               <Search
                 className="absolute left-3 top-2.5 text-slate-400"
                 size={16}
               />
               <input
                 className="bg-slate-50 rounded-lg pl-9 pr-4 py-2 text-sm"
-                placeholder="Search records..."
+                placeholder="Search purchase orders..."
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
               />
-            </div>
-            <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-semibold">
+            </div>}
+            <div aria-label={`Signed in as ${user.name}`} className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 font-semibold text-emerald-700">
               {user.name[0]}
             </div>
-            <button onClick={() => setCopilotOpen(true)} className="flex items-center gap-2 rounded-xl bg-emerald-700 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-800">
-              <MessageCircle size={16} /> Copilot
+            <button aria-label="Open Copilot" onClick={() => setCopilotOpen(true)} className="flex min-h-10 items-center gap-2 rounded-xl bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
+              <MessageCircle size={16} /> <span className="hidden sm:inline">Copilot</span>
             </button>
           </div>
         </header>
-        <div className="p-10 max-w-[1500px]">
+        <div className="app-content p-10">
+          {dataError && <div role="alert" className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{dataError}</span><button aria-label="Dismiss error" onClick={() => setDataError("")}><XCircle size={16} /></button></div>}
+          {loading && Object.keys(data).length === 0 && <WorkspaceLoading />}
           {toast && (
             <div className="fixed right-8 top-24 z-10 bg-ink text-white px-4 py-3 rounded-xl text-sm shadow-lg">
               {toast}
-              <button onClick={() => setToast("")} className="ml-4">
+              <button aria-label="Dismiss notification" onClick={() => setToast("")} className="ml-4">
                 <XCircle size={14} />
               </button>
             </div>
@@ -353,6 +390,7 @@ function App() {
           {page === "PO Inbox" && (
             <Inbox
               pos={pos}
+              query={globalSearch}
               onSelect={setSelected}
               onAction={action}
               onRefresh={refresh}
@@ -361,7 +399,7 @@ function App() {
           {page === "Inventory" && (
             <InventoryWorkspace
               rows={data.inventory || []}
-              masters={data.masters || {}}
+              masters={operationalMasters}
               transactions={data.transactions || []}
               onSave={saveInventory}
               onRefresh={refreshInventory}
@@ -426,9 +464,9 @@ function Dashboard({
 }) {
   return (
     <>
-      <div className="flex items-end justify-between mb-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-sm text-slate-500">Thursday, 01 October 2026</p>
+          <p className="text-sm text-slate-500">{new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }).format(new Date())}</p>
           <h2 className="text-3xl font-semibold mt-2">Good morning, team.</h2>
         </div>
         <button
@@ -439,18 +477,18 @@ function Dashboard({
           Upload purchase order
         </button>
       </div>
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           label="Awaiting review"
           value={counts.UNDER_REVIEW || counts.UPLOADED}
           sub="Needs your attention"
           icon={ClipboardList}
-          color="bg-violet-100 text-violet-700"
+          color="bg-emerald-100 text-emerald-700"
         />
         <Stat
-          label="Inventory blocked"
+          label="Accepted POs"
           value={counts.ACCEPTED || 0}
-          sub="Accepted POs"
+          sub="Ready for fulfilment"
           icon={Archive}
           color="bg-blue-100 text-blue-700"
         />
@@ -469,8 +507,8 @@ function Dashboard({
           color="bg-emerald-100 text-emerald-700"
         />
       </div>
-      <div className="grid grid-cols-[1.4fr_1fr] gap-6 mt-8">
-        <div className="bg-white rounded-2xl border border-slate-100">
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
+    <div className="panel overflow-x-auto">
           <div className="p-5 border-b border-slate-100 flex justify-between">
             <div>
               <h3 className="font-semibold">Recent purchase orders</h3>
@@ -560,7 +598,7 @@ function Section({
   action?: any;
 }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-100">
+    <div className="panel overflow-x-auto">
       <div className="p-5 border-b border-slate-100 flex justify-between items-center">
         <h3 className="font-semibold">{title}</h3>
         {action}
@@ -571,16 +609,26 @@ function Section({
 }
 function Inbox({
   pos,
+  query,
   onSelect,
   onAction,
   onRefresh,
 }: {
   pos: PO[];
+  query: string;
   onSelect: (p: PO) => void;
   onAction: Function;
   onRefresh: Function;
 }) {
-  const [show, setShow] = useState(false);
+  const [show, setShow] = useState(false),
+    [filters, setFilters] = useState<PoFilters>(emptyPoFilters);
+  const filteredPos = useMemo(() => filterPos(pos, query, filters), [pos, query, filters]);
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const updateFilter = (key: keyof PoFilters, value: string) => setFilters(current => ({ ...current, [key]: value }));
+  const clearFilters = () => setFilters(emptyPoFilters());
+  const statuses = [...new Set(pos.map(p => p.status).filter(Boolean))];
+  const platforms = pos.map(p => p.platform).filter((p: any, index: number, list: any[]) => p?.id && list.findIndex(x => x?.id === p.id) === index);
+  const warehouses = pos.map(p => p.warehouse).filter((w: any, index: number, list: any[]) => w?.id && list.findIndex(x => x?.id === w.id) === index);
   return (
     <>
       <div className="flex justify-between items-end mb-7">
@@ -593,19 +641,46 @@ function Inbox({
           Upload purchase order
         </UiButton>
       </div>
-      <Section title={`${pos.length} purchase orders`}>
-        <div className="grid grid-cols-[1fr_1.2fr_1.2fr_1fr_140px] text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
+      <Section title={`${filteredPos.length} of ${pos.length} purchase orders`} action={
+        <button onClick={clearFilters} disabled={!activeFilterCount} className="text-sm font-semibold text-emerald-700 disabled:text-slate-300">
+          Clear filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+        </button>
+      }>
+        <div className="grid gap-3 border-b border-slate-100 bg-white p-5 md:grid-cols-3 lg:grid-cols-4">
+          <select aria-label="Filter by status" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.status} onChange={e => updateFilter('status', e.target.value)}>
+            <option value="">All statuses</option>{statuses.map(status => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
+          </select>
+          <select aria-label="Filter by platform" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.platform} onChange={e => updateFilter('platform', e.target.value)}>
+            <option value="">All platforms</option>{platforms.map((platform: any) => <option key={platform.id} value={platform.id}>{platform.name}</option>)}
+          </select>
+          <select aria-label="Filter by warehouse" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.warehouse} onChange={e => updateFilter('warehouse', e.target.value)}>
+            <option value="">All warehouses</option>{warehouses.map((warehouse: any) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
+          </select>
+          <select aria-label="Filter by appointment" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.appointment} onChange={e => updateFilter('appointment', e.target.value)}>
+            <option value="">All appointments</option><option value="PENDING">Pending</option><option value="BOOKED">Booked</option><option value="MISSING_DOCUMENT">Missing document</option>
+          </select>
+          <select aria-label="Filter by stock exception" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.exception} onChange={e => updateFilter('exception', e.target.value)}>
+            <option value="">All stock states</option><option value="NO_SHORTAGE">No shortage</option><option value="SHORTAGE">Shortage</option>
+          </select>
+          <label className="text-xs text-slate-500">PO date from<input aria-label="PO date from" type="date" className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700" value={filters.from} onChange={e => updateFilter('from', e.target.value)} /></label>
+          <label className="text-xs text-slate-500">PO date to<input aria-label="PO date to" type="date" className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700" value={filters.to} onChange={e => updateFilter('to', e.target.value)} /></label>
+        </div>
+        <div className="overflow-x-auto">
+        <div className="grid min-w-[760px] grid-cols-[1fr_1.2fr_1.2fr_1fr_140px] text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
           <span>PO ID</span>
           <span>Platform / destination</span>
           <span>Warehouse</span>
           <span>Status</span>
           <span></span>
         </div>
-        {pos.map((p) => (
+        {filteredPos.map((p) => (
           <div
             key={p.id}
             onClick={() => onSelect(p)}
-            className="grid grid-cols-[1fr_1.2fr_1.2fr_1fr_140px] items-center px-5 py-4 border-t border-slate-50 hover:bg-slate-50 cursor-pointer"
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(p); } }}
+            role="button"
+            tabIndex={0}
+            className="grid min-w-[760px] grid-cols-[1fr_1.2fr_1.2fr_1fr_140px] items-center px-5 py-4 border-t border-slate-50 hover:bg-slate-50 cursor-pointer"
           >
             <div className="mono text-sm font-semibold">{p.externalId}</div>
             <div>
@@ -646,6 +721,8 @@ function Inbox({
             </div>
           </div>
         ))}
+        {filteredPos.length === 0 && <div className="px-5 py-12 text-center text-sm text-slate-500">No purchase orders match the current search and filters.</div>}
+        </div>
       </Section>
       {show && (
         <ReviewUploadForm onClose={() => setShow(false)} onAction={onAction} />
@@ -697,7 +774,7 @@ function UploadForm({
             onChange={(e) => setBody({ ...body, platformId: e.target.value })}
           >
             <option value="">Select platform</option>
-            {(masters.platforms || []).map((x: any) => (
+            {(masters.platforms || []).filter((x: any) => x.active !== false).map((x: any) => (
               <option key={x.id} value={x.id}>
                 {x.name}
               </option>
@@ -799,17 +876,19 @@ function ReviewUploadForm({
         const matched = (masters.skus || []).find((sku: any) =>
           ["code", "sku", "sku_code", "channel_item_code", "asin", "ean"].some(key => identifiers.includes(skuValue(sku, key)))
         ) || (line.itemId ? (masters.skus || []).find((sku: any) => sku.id === line.itemId) : null) || (line.description ? (masters.skus || []).find((sku: any) => skuValue(sku, "name") === skuValue(line, "description")) : null);
-        return { skuId: line.itemId || matched?.id || "", ordered: Number(line.ordered || line.approved || 0), unitPrice: Number(line.unitPrice || 0), sourceCode: line.channelItemCode || line.asin || line.ean || line.description || "" };
+        return { skuId: line.itemId || matched?.id || "", ordered: Number(line.ordered ?? line.approved ?? line.pending ?? 0), unitPrice: Number(line.unitPrice ?? 0), channelItemCode: line.asin || line.channelItemCode || line.ean || "", sourceCode: line.asin || line.channelItemCode || line.ean || line.description || "" };
       });
       setBody({
         platformId,
         externalId: extracted.externalId || "",
-        destination: extracted.destinationCity || extracted.destination || extracted.fcCode || "",
+        destination: extracted.fcCode || extracted.destination || extracted.destinationCity || "",
         destinationName: extracted.destinationAddress || extracted.destination || extracted.destinationCity || extracted.fcCode || "",
         destinationAddress: extracted.destinationAddress || extracted.destination || "",
         destinationCity: extracted.destinationCity || "",
         sourceAddress: extracted.sourceAddress || "",
         sourceCity: extracted.sourceCity || "",
+        sourceWarehouseId: (masters.warehouses || []).find((warehouse: any) => String(warehouse.city || '').toLowerCase() === String(extracted.sourceCity || '').toLowerCase())?.id || "",
+        sourceLocationId: "",
         sourceState: extracted.sourceState || "",
         sourcePostalCode: extracted.sourcePostalCode || "",
         destinationState: extracted.destinationState || "",
@@ -832,6 +911,12 @@ function ReviewUploadForm({
     } finally {
       setBusy(false);
     }
+  };
+  const startManualEntry = () => {
+    setError("");
+    setFile(null);
+    setScan({ confidence: 0, manual: true });
+    setBody({ platformId, externalId: "", destination: "", destinationName: "", destinationAddress: "", destinationCity: "", sourceAddress: "", sourceCity: "", sourceWarehouseId: "", sourceLocationId: "", sourceState: "", sourcePostalCode: "", destinationState: "", destinationPostalCode: "", poDate: "", deadline: "", customer: "", totalValue: 0, lines: [] });
   };
   const addLine = () =>
     setBody((b: any) => ({
@@ -857,8 +942,8 @@ function ReviewUploadForm({
     if (saved) onClose();
   };
   return (
-    <div className="fixed inset-0 bg-black/40 z-20 flex items-center justify-center p-8">
-      <UiCard className="max-h-[90vh] w-full max-w-6xl overflow-auto">
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 p-3 sm:p-5">
+      <UiCard className="max-h-[96vh] w-full max-w-[min(1600px,96vw)] overflow-auto">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -892,7 +977,7 @@ function ReviewUploadForm({
                   onChange={(e) => setPlatformId(e.target.value)}
                 >
                   <option value="">Select platform</option>
-                  {(masters.platforms || []).map((x: any) => (
+                  {(masters.platforms || []).filter((x: any) => x.active !== false).map((x: any) => (
                     <option key={x.id} value={x.id}>
                       {x.name}
                     </option>
@@ -939,10 +1024,13 @@ function ReviewUploadForm({
               >
                 {busy ? "Scanning file..." : "Scan and open review"}
               </UiButton>
+              <button type="button" onClick={startManualEntry} disabled={!platformId || busy} className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 hover:border-emerald-400 disabled:opacity-50">
+                Enter PO manually
+              </button>
             </div>
           ) : (
             <div>
-              <div className="grid gap-5 lg:grid-cols-[1.25fr_.75fr]">
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
                 <div>
                   <UiCard>
                     <CardHeader>
@@ -1005,11 +1093,34 @@ function ReviewUploadForm({
                           />
                         </UiLabel>
                         <UiLabel>
+                          Source warehouse
+                          <select
+                            className="mt-2 w-full rounded-xl border border-slate-200 p-3"
+                            value={body.sourceWarehouseId || ""}
+                            onChange={(e) => setBody({ ...body, sourceWarehouseId: e.target.value, sourceLocationId: "", sourceCity: (masters.warehouses || []).find((warehouse: any) => warehouse.id === e.target.value)?.city || body.sourceCity || "" })}
+                          >
+                            <option value="">Select source warehouse</option>
+                            {(masters.warehouses || []).filter((warehouse: any) => warehouse.active !== false).map((warehouse: any) => <option key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name} · {warehouse.city}</option>)}
+                          </select>
+                        </UiLabel>
+                        <UiLabel>
+                          Stock location
+                          <select
+                            className="mt-2 w-full rounded-xl border border-slate-200 p-3"
+                            value={body.sourceLocationId || ""}
+                            onChange={(e) => setBody({ ...body, sourceLocationId: e.target.value })}
+                            disabled={!body.sourceWarehouseId}
+                          >
+                            <option value="">Auto-select warehouse stock location</option>
+                            {(masters.locations || []).filter((location: any) => location.site_id === body.sourceWarehouseId && location.active !== false && location.virtual !== true).map((location: any) => <option key={location.id} value={location.id}>{location.code} · {location.name}</option>)}
+                          </select>
+                        </UiLabel>
+                        <UiLabel>
                           Source city
                           <UiInput
                             className="mt-2"
                             value={body.sourceCity || ""}
-                            placeholder="Required for warehouse resolution"
+                            placeholder="Filled from warehouse"
                             onChange={(e) => setBody({ ...body, sourceCity: e.target.value })}
                           />
                         </UiLabel>
@@ -1088,33 +1199,47 @@ function ReviewUploadForm({
                       </div>
                     </CardHeader>
                     <CardContent>
+                      <div className="mb-2 hidden grid-cols-[minmax(0,1fr)_150px_150px_32px] gap-3 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400 sm:grid">
+                        <span>SKU</span>
+                        <span>Quantity</span>
+                        <span>Unit price</span>
+                        <span />
+                      </div>
                       <div className="space-y-3">
-                        {(body.lines || []).map((l: any, i: number) => (
+                          {(body.lines || []).map((l: any, i: number) => {
+                            const selectedSku = (masters.skus || []).find((sku: any) => sku.id === l.skuId);
+                            return (
                           <div
                             key={i}
-                            className="grid gap-3 rounded-xl bg-slate-50 p-3 sm:grid-cols-[1.5fr_.6fr_.7fr_32px]"
+                            className="grid gap-3 rounded-xl bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_150px_150px_32px]"
                           >
-                            <select
-                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            <div className="min-w-0">
+                              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                <div className="mono truncate text-sm font-semibold text-slate-800">{l.sourceCode || "Platform code not provided"}</div>
+                                <div className="mt-1 truncate text-xs text-slate-500">{selectedSku?.name || "Product mapping required"}</div>
+                              </div>
+                              <select
+                              aria-label="Change internal product mapping"
+                              className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500"
                               value={l.skuId}
                               onChange={(e) => {
                                 const lines = [...body.lines];
                                 lines[i] = { ...l, skuId: e.target.value };
                                 setBody({ ...body, lines });
                               }}
-                            >
-                              <option value="">Select SKU</option>
-                              {!l.skuId && l.sourceCode && <option value="" disabled>Extracted: {l.sourceCode}</option>}
+                              >
+                              <option value="">Change product mapping</option>
                               {(masters.skus || []).map((s: any) => (
                                 <option key={s.id} value={s.id}>
-                                  {s.code} Â· {s.name}
+                                  {s.name}
                                 </option>
                               ))}
-                            </select>
+                              </select>
+                            </div>
                             <UiInput
                               type="number"
                               placeholder="Qty"
-                              value={l.ordered || ""}
+                              value={l.ordered ?? ""}
                               onChange={(e) => {
                                 const lines = [...body.lines];
                                 lines[i] = {
@@ -1127,7 +1252,7 @@ function ReviewUploadForm({
                             <UiInput
                               type="number"
                               placeholder="Unit price"
-                              value={l.unitPrice || ""}
+                              value={l.unitPrice ?? ""}
                               onChange={(e) => {
                                 const lines = [...body.lines];
                                 lines[i] = {
@@ -1150,7 +1275,8 @@ function ReviewUploadForm({
                               <XCircle size={18} className="text-slate-400" />
                             </button>
                           </div>
-                        ))}
+                            );
+                          })}
                         {!body.lines.length && (
                           <div className="rounded-xl border border-dashed p-6 text-center text-sm text-slate-400">
                             No lines extracted. Add the PO SKUs here before
@@ -1229,7 +1355,7 @@ function Inventory({ rows, onAction }: { rows: any[]; onAction: Function }) {
         </button>
       </div>
       <Section title="Warehouse balances">
-        <div className="grid grid-cols-6 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
+        <div className="grid min-w-[760px] grid-cols-6 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
           <span>SKU</span>
           <span>Warehouse</span>
           <span>Physical</span>
@@ -1239,7 +1365,7 @@ function Inventory({ rows, onAction }: { rows: any[]; onAction: Function }) {
         </div>
         {rows.map((r) => (
           <div
-            className="grid grid-cols-6 px-5 py-5 border-t border-slate-50 items-center"
+            className="grid min-w-[760px] grid-cols-6 px-5 py-5 border-t border-slate-50 items-center"
             key={r.id}
           >
             <div className="mono text-sm font-semibold">
@@ -1290,7 +1416,7 @@ function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
         </button>
       </div>
       <Section title={`${items.length} shipments`}>
-        <div className="grid grid-cols-5 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
+        <div className="grid min-w-[680px] grid-cols-5 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
           <span>Shipment</span>
           <span>PO</span>
           <span>Vehicle</span>
@@ -1299,7 +1425,7 @@ function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
         </div>
         {items.map((s) => (
           <div
-            className="grid grid-cols-5 px-5 py-5 border-t border-slate-50 items-center"
+            className="grid min-w-[680px] grid-cols-5 px-5 py-5 border-t border-slate-50 items-center"
             key={s.id}
           >
             <div className="mono font-semibold text-sm">{s.number}</div>
@@ -1352,6 +1478,7 @@ function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
 }
 function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
   const [selected, setSelected] = useState<PO | null>(null),
+    [consignmentSelected, setConsignmentSelected] = useState<PO | null>(null),
     [expanded, setExpanded] = useState<Record<string, boolean>>({});
   return (
     <>
@@ -1362,7 +1489,7 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
         <h2 className="text-3xl font-semibold mt-2">Appointments</h2>
       </div>
       <Section title="Appointment queue">
-        <div className="grid grid-cols-4 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
+        <div className="grid min-w-[620px] grid-cols-4 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
           <span>PO</span>
           <span>Destination</span>
           <span>Status</span>
@@ -1375,7 +1502,7 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
               <button
                 type="button"
                 onClick={() => setExpanded((current) => ({ ...current, [p.id]: !current[p.id] }))}
-                className="grid w-full grid-cols-4 items-center border-t border-slate-50 px-5 py-5 text-left hover:bg-slate-50"
+                className="grid min-w-[620px] w-full grid-cols-4 items-center border-t border-slate-50 px-5 py-5 text-left hover:bg-slate-50"
               >
                 <span className="flex items-center gap-2 mono text-sm font-semibold">
                   {isExpanded ? <ChevronDown size={15} className="text-slate-400" /> : <ChevronRight size={15} className="text-slate-400" />}
@@ -1395,11 +1522,10 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
                       </div>
                     ))}
                   </div>
-                  {!p.appointment?.appointmentAt && (
-                    <button onClick={() => setSelected(p)} className="mt-4 text-sm font-semibold text-emerald-700">
-                      Attach appointment
-                    </button>
-                  )}
+                  <div className="mt-4 flex gap-4">
+                    {!p.appointment?.appointmentAt && <button onClick={() => setSelected(p)} className="text-sm font-semibold text-emerald-700">Attach appointment</button>}
+                    <button onClick={() => setConsignmentSelected(p)} className="text-sm font-semibold text-emerald-700">Attach consignment</button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1412,6 +1538,15 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
           mode="appointment"
           po={selected}
           onClose={() => setSelected(null)}
+          onSaved={() => location.reload()}
+        />
+      )}
+      {consignmentSelected && (
+        <DocumentWorkflowModal
+          apiBase={API}
+          mode="consignment"
+          po={consignmentSelected}
+          onClose={() => setConsignmentSelected(null)}
           onSaved={() => location.reload()}
         />
       )}
@@ -1437,7 +1572,7 @@ function Invoices({ pos, onAction }: { pos: PO[]; onAction: Function }) {
         <h2 className="text-3xl font-semibold mt-2">Invoice queue</h2>
       </div>
       <Section title="Delivery and closure queue">
-        <div className="grid grid-cols-4 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
+        <div className="grid min-w-[620px] grid-cols-4 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
           <span>PO</span>
           <span>Status</span>
           <span>Invoice</span>
@@ -1445,7 +1580,7 @@ function Invoices({ pos, onAction }: { pos: PO[]; onAction: Function }) {
         </div>
         {queue.map((p) => (
           <div
-            className="grid grid-cols-4 px-5 py-5 border-t border-slate-50 items-center"
+            className="grid min-w-[620px] grid-cols-4 px-5 py-5 border-t border-slate-50 items-center"
             key={p.id}
           >
             <span className="mono text-sm font-semibold">{p.externalId}</span>
@@ -1502,10 +1637,11 @@ function AdminModal({ title, children, close }: { title: string; children: any; 
 function Masters({ data, onAction }: { data: any; onAction: Function }) {
   const [modal, setModal] = useState<'platform' | 'warehouse' | null>(null), [edit, setEdit] = useState<any>(null), [error, setError] = useState('');
   const open = (type: 'platform' | 'warehouse', value?: any) => { setError(''); setEdit(value || null); setModal(type); };
-  const save = async (path: string, body: any) => { setError(''); const ok = await onAction(path, body); if (ok) { setModal(null); setEdit(null); location.reload(); } };
+  const save = async (path: string, body: any) => { setError(''); const ok = await onAction(path, body, (message: string) => setError(message)); if (ok) { setModal(null); setEdit(null); location.reload(); } };
+  const remove = async (path: string) => { if (window.confirm('Delete this record permanently? This will fail if it is already used in historical data.')) await save(path, {}); };
   return <>
     <div className="mb-7"><p className="text-sm text-slate-500">Controlled operational data</p><h2 className="text-3xl font-semibold mt-2">Administration</h2></div>
-    <div className="grid grid-cols-3 gap-5">
+    <div className="grid gap-5 lg:grid-cols-3">
       <Section title="Platforms" action={<button onClick={() => open('platform')} className="rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white"><Plus size={14} className="mr-1 inline"/>Add platform</button>}>
         <div className="p-5 space-y-4">{(data.platforms || []).map((x: any) => <div className="flex items-center justify-between gap-3 text-sm" key={x.id}><div><div className="font-medium">{x.name}</div><div className="mono text-xs text-slate-400">{x.code} · {x.channel_type || 'MARKETPLACE'}</div></div><div className="flex items-center gap-2"><Badge tone={x.active === false ? 'slate' : 'green'}>{x.active === false ? 'Inactive' : 'Active'}</Badge><button onClick={() => open('platform', x)} className="text-xs font-semibold text-emerald-700">Edit</button></div></div>)}</div>
       </Section>
@@ -1514,12 +1650,12 @@ function Masters({ data, onAction }: { data: any; onAction: Function }) {
       </Section>
       <Section title="SKUs"><div className="p-5 space-y-4">{(data.skus || []).map((x: any) => <div className="flex justify-between text-sm" key={x.id}><span>{x.name}</span><span className="mono text-xs text-slate-400">{x.code}</span></div>)}</div></Section>
     </div>
-    {modal === 'platform' && <AdminModal title={edit ? 'Edit platform' : 'Add platform'} close={() => setModal(null)}><PlatformAdminForm value={edit} error={error} save={(body: any) => save(edit ? `/api/platforms/${edit.id}` : '/api/platforms', body)} /></AdminModal>}
-    {modal === 'warehouse' && <AdminModal title={edit ? 'Edit warehouse' : 'Add warehouse'} close={() => setModal(null)}><WarehouseAdminForm value={edit} error={error} save={(body: any) => save(edit ? `/api/warehouses/${edit.id}` : '/api/warehouses', body)} /></AdminModal>}
+    {modal === 'platform' && <AdminModal title={edit ? 'Edit platform' : 'Add platform'} close={() => setModal(null)}><PlatformAdminForm value={edit} error={error} save={(body: any) => save(edit ? `/api/platforms/${edit.id}` : '/api/platforms', body)} remove={() => remove(`/api/platforms/${edit.id}/delete`)} /></AdminModal>}
+    {modal === 'warehouse' && <AdminModal title={edit ? 'Edit warehouse' : 'Add warehouse'} close={() => setModal(null)}><WarehouseAdminForm value={edit} error={error} save={(body: any) => save(edit ? `/api/warehouses/${edit.id}` : '/api/warehouses', body)} remove={() => remove(`/api/warehouses/${edit.id}/delete`)} /></AdminModal>}
   </>;
 }
-function PlatformAdminForm({ value, error, save }: any) { const [v, setV] = useState<any>(value || { channelType: 'MARKETPLACE', ingestionMethod: 'FILE', active: true }); return <form className="space-y-4" onSubmit={e => { e.preventDefault(); save(v); }}><UiLabel>Platform code<UiInput className="mt-1" required value={v.code || ''} onChange={e => setV({ ...v, code: e.target.value })}/></UiLabel><UiLabel>Platform name<UiInput className="mt-1" required value={v.name || ''} onChange={e => setV({ ...v, name: e.target.value })}/></UiLabel><UiLabel>Type<select className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={v.channelType || v.channel_type || 'MARKETPLACE'} onChange={e => setV({ ...v, channelType: e.target.value })}>{['MARKETPLACE','QUICK_COMMERCE','D2C','DISTRIBUTOR','B2B','RETAIL'].map(x => <option key={x}>{x}</option>)}</select></UiLabel><UiLabel>Ingestion method<select className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={v.ingestionMethod || v.ingestion_method || 'FILE'} onChange={e => setV({ ...v, ingestionMethod: e.target.value })}>{['API','FILE','PORTAL_EXPORT','MANUAL'].map(x => <option key={x}>{x}</option>)}</select></UiLabel>{error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}<div className="flex gap-2"><button className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save platform</button>{value && <button type="button" onClick={() => save(`/api/platforms/${value.id}`, { active: false })} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700">Deactivate</button>}</div></form>; }
-function WarehouseAdminForm({ value, error, save }: any) { const [v, setV] = useState<any>(value || { active: true }); return <form className="space-y-4" onSubmit={e => { e.preventDefault(); save(v); }}><div className="grid gap-4 sm:grid-cols-2"><UiLabel>Warehouse code<UiInput className="mt-1" required value={v.code || ''} onChange={e => setV({ ...v, code: e.target.value })}/></UiLabel><UiLabel>Warehouse name<UiInput className="mt-1" required value={v.name || ''} onChange={e => setV({ ...v, name: e.target.value })}/></UiLabel><UiLabel>City<UiInput className="mt-1" required value={v.city || ''} onChange={e => setV({ ...v, city: e.target.value })}/></UiLabel><UiLabel>State<UiInput className="mt-1" value={v.state || ''} onChange={e => setV({ ...v, state: e.target.value })}/></UiLabel><UiLabel>Address line 1<UiInput className="mt-1" value={v.addressLine1 || v.address_line1 || ''} onChange={e => setV({ ...v, addressLine1: e.target.value })}/></UiLabel><UiLabel>Postal code<UiInput className="mt-1" value={v.postalCode || v.postal_code || ''} onChange={e => setV({ ...v, postalCode: e.target.value })}/></UiLabel></div><UiLabel>Address line 2<UiInput className="mt-1" value={v.addressLine2 || v.address_line2 || ''} onChange={e => setV({ ...v, addressLine2: e.target.value })}/></UiLabel>{error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}<div className="flex gap-2"><button className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save warehouse</button>{value && <button type="button" onClick={() => save(`/api/warehouses/${value.id}`, { active: false })} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700">Deactivate</button>}</div></form>; }
+function PlatformAdminForm({ value, error, save, remove }: any) { const [v,setV]=useState<any>(value||{channelType:'MARKETPLACE',ingestionMethod:'FILE',active:true}); return <form className="space-y-4" onSubmit={e=>{e.preventDefault();save(v);}}><UiLabel>Platform code<UiInput className="mt-1" required value={v.code||''} onChange={e=>setV({...v,code:e.target.value})}/></UiLabel><UiLabel>Platform name<UiInput className="mt-1" required value={v.name||''} onChange={e=>setV({...v,name:e.target.value})}/></UiLabel><UiLabel>Type<select className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={v.channelType||v.channel_type||'MARKETPLACE'} onChange={e=>setV({...v,channelType:e.target.value})}>{['MARKETPLACE','QUICK_COMMERCE','D2C','DISTRIBUTOR','B2B','RETAIL'].map(x=><option key={x}>{x}</option>)}</select></UiLabel><UiLabel>Ingestion method<select className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={v.ingestionMethod||v.ingestion_method||'FILE'} onChange={e=>setV({...v,ingestionMethod:e.target.value})}>{['API','FILE','PORTAL_EXPORT','MANUAL'].map(x=><option key={x}>{x}</option>)}</select></UiLabel>{error&&<div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}<div className="flex gap-2"><button className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save platform</button>{value&&<><button type="button" onClick={()=>{if(window.confirm('Deactivate this platform? Existing history will be kept.'))save({active:false});}} className="rounded-lg border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700">Deactivate</button><button type="button" onClick={remove} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700">Delete permanently</button></>}</div></form>; }
+function WarehouseAdminForm({ value, error, save, remove }: any) { const [v,setV]=useState<any>(value||{active:true}); return <form className="space-y-4" onSubmit={e=>{e.preventDefault();save(v);}}><div className="grid gap-4 sm:grid-cols-2"><UiLabel>Warehouse code<UiInput className="mt-1" required value={v.code||''} onChange={e=>setV({...v,code:e.target.value})}/></UiLabel><UiLabel>Warehouse name<UiInput className="mt-1" required value={v.name||''} onChange={e=>setV({...v,name:e.target.value})}/></UiLabel><UiLabel>City<UiInput className="mt-1" required value={v.city||''} onChange={e=>setV({...v,city:e.target.value})}/></UiLabel><UiLabel>State<UiInput className="mt-1" value={v.state||''} onChange={e=>setV({...v,state:e.target.value})}/></UiLabel><UiLabel>Address line 1<UiInput className="mt-1" value={v.addressLine1||v.address_line1||''} onChange={e=>setV({...v,addressLine1:e.target.value})}/></UiLabel><UiLabel>Postal code<UiInput className="mt-1" value={v.postalCode||v.postal_code||''} onChange={e=>setV({...v,postalCode:e.target.value})}/></UiLabel></div><UiLabel>Address line 2<UiInput className="mt-1" value={v.addressLine2||v.address_line2||''} onChange={e=>setV({...v,addressLine2:e.target.value})}/></UiLabel>{error&&<div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}<div className="flex gap-2"><button className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save warehouse</button>{value&&<><button type="button" onClick={()=>{if(window.confirm('Deactivate this warehouse? Existing history will be kept.'))save({active:false});}} className="rounded-lg border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700">Deactivate</button><button type="button" onClick={remove} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700">Delete permanently</button></>}</div></form>; }
 function Audit() {
   const [rows, setRows] = useState<any[]>([]);
   useEffect(() => {
@@ -1532,7 +1668,7 @@ function Audit() {
         <h2 className="text-3xl font-semibold mt-2">Audit log</h2>
       </div>
       <Section title={`${rows.length} recent events`}>
-        <div className="grid grid-cols-4 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
+        <div className="grid min-w-[620px] grid-cols-4 text-xs uppercase tracking-wide text-slate-400 px-5 py-3 bg-slate-50">
           <span>Action</span>
           <span>Record</span>
           <span>User</span>
@@ -1540,7 +1676,7 @@ function Audit() {
         </div>
         {rows.map((x) => (
           <div
-            className="grid grid-cols-4 px-5 py-4 border-t border-slate-50 text-sm"
+            className="grid min-w-[620px] grid-cols-4 px-5 py-4 border-t border-slate-50 text-sm"
             key={x.id}
           >
             <span className="font-semibold">{x.action}</span>
@@ -1600,17 +1736,21 @@ function Details({
         </div>
         <h3 className="font-semibold mt-8 mb-3">Line reconciliation</h3>
         <div className="border rounded-xl overflow-hidden">
-          <div className="grid grid-cols-4 text-xs text-slate-400 bg-slate-50 p-3">
+          <div className="grid grid-cols-6 text-xs text-slate-400 bg-slate-50 p-3">
             <span>SKU</span>
             <span>Ordered</span>
-            <span>Blocked</span>
+            <span>Reserved</span>
+            <span>Planned</span>
+            <span>Dispatched</span>
             <span>Delivered</span>
           </div>
           {(po.lines || []).map((l: any) => (
-            <div className="grid grid-cols-4 p-3 border-t text-sm" key={l.id}>
+            <div className="grid grid-cols-6 p-3 border-t text-sm" key={l.id}>
               <span className="mono">{l.sku?.code}</span>
               <span>{l.ordered}</span>
               <span>{l.allocated}</span>
+              <span>{l.planned || 0}</span>
+              <span>{l.dispatched || 0}</span>
               <span>{l.delivered}</span>
             </div>
           ))}

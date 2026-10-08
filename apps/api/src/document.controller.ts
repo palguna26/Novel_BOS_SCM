@@ -18,6 +18,13 @@ export class DocumentController {
     return { ...result, userId: req.user.id };
   }
 
+  @Post('preview')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_DOCUMENT_SIZE, fieldSize: MAX_DOCUMENT_SIZE } }))
+  async preview(@UploadedFile() file: Express.Multer.File, @Body('extractedText') extractedText: string | undefined, @Req() req: any) {
+    if (!file) throw new BadRequestException('File is required.');
+    return this.docs.previewAndExtract(file.originalname, file.buffer, req.user, file.mimetype, extractedText);
+  }
+
   @Get(':id/url')
   signedUrl(@Param('id') id: string, @Req() req: any) {
     return this.docs.signedUrl(id, req.user);

@@ -3,6 +3,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { AppService } from './app.service';
 
 const user = { id: 'user-1', email: 'user@example.test', name: 'User', role: 'TEAM_MEMBER', companyId: 'company-1', canRead: true, canWrite: true, canApprove: false };
+const approver = { ...user, canApprove: true };
 
 function service() {
   const supabase: any = { rpc: jest.fn(async () => ({ data: { ok: true }, error: null })), schema: jest.fn() };
@@ -34,5 +35,26 @@ describe('AppService v2 command mapping', () => {
     const { app } = service();
     await expect(app.shortClose(user, 'po-1', { reason: 'close', remainingQuantity: 1 }, 'close-1')).rejects.toBeInstanceOf(ForbiddenException);
     await expect(app.reverseStock(user, 'tx-1', { reason: 'mistake' }, 'reverse-1')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('deletes a platform through the atomic database command', async () => {
+    const { app, supabase } = service();
+    await expect(app.deletePlatform(approver, 'channel-1')).resolves.toEqual({ ok: true });
+    expect(supabase.rpc).toHaveBeenCalledWith('master_data', 'delete_channel', {
+      p_company_id: 'company-1', p_channel_id: 'channel-1', p_actor_id: 'user-1',
+    });
+  });
+
+  it('does not report a successful delete when the atomic command fails', async () => {
+    const { app, supabase } = service();
+    supabase.rpc.mockResolvedValueOnce({ data: null, error: { message: 'foreign key violation' } });
+    await expect(app.deleteWarehouse(approver, 'site-1')).rejects.toThrow('foreign key violation');
+    expect(supabase.schema).not.toHaveBeenCalled();
+  });
+
+  it('requires approval access for permanent master-data deletion', async () => {
+    const { app } = service();
+    await expect(app.deletePlatform(user, 'channel-1')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(app.deleteWarehouse(user, 'site-1')).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

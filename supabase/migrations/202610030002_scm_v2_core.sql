@@ -27,10 +27,13 @@ create table scm.purchase_orders (
   created_by uuid references iam.users(id) on delete restrict,
   created_at timestamptz not null default statement_timestamp(),
   updated_at timestamptz not null default statement_timestamp(),
-  unique (company_id, channel_id, external_id),
   unique (company_id, id),
   check ((source_site_id is null) = (source_location_id is null))
 );
+
+create unique index purchase_orders_company_id_channel_id_external_id_key
+  on scm.purchase_orders(company_id, channel_id, external_id)
+  where status not in ('CANCELLED','CLOSED');
 
 create table scm.purchase_order_lines (
   id uuid primary key default gen_random_uuid(),

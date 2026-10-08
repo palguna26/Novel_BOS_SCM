@@ -58,7 +58,7 @@ export class AppService {
 
   async listPos(user: AuthenticatedUser): Promise<Row[]> {
     const companyId = user.companyId;
-    const [pos, lines, channels, sites, gates, appointments, reservations, reservationLines, shipments, shipmentLines, events, pods, podLines, invoices, exceptions] = await Promise.all([
+    const [pos, lines, channels, sites, gates, appointments, reservations, reservationLines, shipments, shipmentLines, events, pods, podLines, invoices, exceptions, consignments] = await Promise.all([
       this.rows('scm', 'purchase_orders', companyId, 'created_at'),
       this.rows('scm', 'purchase_order_lines', companyId),
       this.rows('master_data', 'channels', companyId),
@@ -74,6 +74,7 @@ export class AppService {
       this.rows('scm', 'pod_lines', companyId),
       this.rows('scm', 'invoices', companyId),
       this.rows('scm', 'delivery_exceptions', companyId),
+      this.rows('scm', 'consignments', companyId),
     ]);
     const [items, documents] = await Promise.all([
       this.rows('master_data', 'items', companyId),
@@ -86,17 +87,25 @@ export class AppService {
       const poLines = lines.filter(x => x.purchase_order_id === po.id).map(line => {
         const relatedShipments = shipmentLines.filter(x => x.purchase_order_line_id === line.id);
         const reservationLine = reservationLines.find(x => x.purchase_order_line_id === line.id);
+        const ordered = Number(line.ordered_quantity);
+        const allocated = Number(reservationLine?.reserved_quantity || 0);
+        const planned = relatedShipments
+          .filter(x => shipmentById.get(x.shipment_id)?.status !== 'CANCELLED')
+          .reduce((sum, x) => sum + Number(x.planned_quantity || 0), 0);
+        const dispatched = relatedShipments.reduce((sum, x) => sum + Number(x.dispatched_quantity || 0), 0);
+        const delivered = relatedShipments.reduce((sum, x) => sum + Number(x.delivered_quantity || 0), 0);
         return {
           ...line,
           poId: po.id,
           skuId: line.item_id,
-          ordered: Number(line.ordered_quantity),
-          allocated: Number(reservationLine?.reserved_quantity || 0),
-          planned: relatedShipments
-            .filter(x => shipmentById.get(x.shipment_id)?.status !== 'CANCELLED')
-            .reduce((sum, x) => sum + Number(x.planned_quantity || 0), 0),
-          dispatched: relatedShipments.reduce((sum, x) => sum + Number(x.dispatched_quantity || 0), 0),
-          delivered: relatedShipments.reduce((sum, x) => sum + Number(x.delivered_quantity || 0), 0),
+          ordered,
+          allocated,
+          planned,
+          dispatched,
+          delivered,
+          availableToPlan: Math.max(0, allocated - planned),
+          availableToReceive: Math.max(0, dispatched - delivered),
+          fillRate: ordered > 0 ? Math.round((delivered / ordered) * 10000) / 100 : 0,
           unitPrice: Number(line.unit_price),
           sku: itemById.get(line.item_id),
         };
@@ -143,6 +152,7 @@ export class AppService {
         reservation: activeReservation || null,
         lines: poLines,
         shipments: poShipments,
+        consignments: consignments.filter(x => x.purchase_order_id === po.id),
         pods: poPods,
         invoice: invoices.find(x => x.purchase_order_id === po.id) || null,
         exceptions: exceptions.filter(x => x.purchase_order_id === po.id),
@@ -274,11 +284,29 @@ export class AppService {
     return result;
   }
 
+  async deletePlatform(user: AuthenticatedUser, id: string) {
+    this.approve(user);
+    return this.rpc('master_data', 'delete_channel', {
+      p_company_id: user.companyId,
+      p_channel_id: id,
+      p_actor_id: user.id,
+    });
+  }
+
   async updateWarehouse(user: AuthenticatedUser, id: string, body: Row) {
     const normalized = { ...body, address_line1: body.address_line1 || body.addressLine1, address_line2: body.address_line2 || body.addressLine2, postal_code: body.postal_code || body.postalCode };
     const result = await this.updateCompanyRow(user, 'master_data', 'sites', id, normalized, ['code', 'name', 'city', 'state', 'address_line1', 'address_line2', 'postal_code', 'active']);
     await this.auditMutation(user, body.active === false ? 'WAREHOUSE_DEACTIVATED' : 'WAREHOUSE_UPDATED', 'MASTER_DATA_SITE', id, null, result);
     return result;
+  }
+
+  async deleteWarehouse(user: AuthenticatedUser, id: string) {
+    this.approve(user);
+    return this.rpc('master_data', 'delete_warehouse', {
+      p_company_id: user.companyId,
+      p_site_id: id,
+      p_actor_id: user.id,
+    });
   }
 
   async createLocation(user: AuthenticatedUser, body: Row) {
@@ -356,6 +384,34 @@ export class AppService {
     return this.rpc('inventory', 'add_stock', { p_company_id: user.companyId, p_site_id: body.warehouseId, p_location_id: body.locationId, p_item_id: body.skuId, p_uom_id: body.uomId, p_quantity: Number(body.quantity), p_reason: body.reason || null, p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey) });
   }
 
+  async updateInventoryPolicy(user: AuthenticatedUser, body: Row) {
+    this.approve(user);
+    const siteId = body.warehouseId || body.siteId;
+    const itemId = body.skuId || body.itemId;
+    const threshold = Number(body.threshold);
+    if (!siteId || !itemId || !Number.isFinite(threshold) || threshold < 0) {
+      throw new BadRequestException('Warehouse, SKU and a non-negative threshold are required');
+    }
+    const effectiveFrom = body.effectiveFrom || new Date().toISOString().slice(0, 10);
+    const { data: oldValue } = await this.sb.schema('inventory').from('inventory_policies').select('*').eq('company_id', user.companyId).eq('site_id', siteId).eq('item_id', itemId).eq('effective_from', effectiveFrom).maybeSingle();
+    const { data, error } = await this.sb.schema('inventory').from('inventory_policies').upsert({
+      company_id: user.companyId,
+      site_id: siteId,
+      item_id: itemId,
+      threshold_quantity: threshold,
+      safety_stock: Number(body.safetyStock || 0),
+      reorder_point: Number(body.reorderPoint || threshold),
+      eoq: Number(body.eoq || 0),
+      maximum_stock: body.maximumStock === '' || body.maximumStock == null ? null : Number(body.maximumStock),
+      service_level: body.serviceLevel == null || body.serviceLevel === '' ? null : Number(body.serviceLevel),
+      effective_from: effectiveFrom,
+      approved_by: user.id,
+    }, { onConflict: 'site_id,item_id,effective_from' }).select().single();
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'INVENTORY_POLICY_UPDATED', 'INVENTORY_POLICY', result.id, oldValue, result);
+    return result;
+  }
+
   async createPo(user: AuthenticatedUser, body: Row, idempotencyKey?: string) {
     this.write(user);
     let documentVersionId = body.documentVersionId;
@@ -387,6 +443,38 @@ export class AppService {
   async shipment(user: AuthenticatedUser, id: string, body: Row, idempotencyKey?: string) {
     this.write(user);
     return this.rpc('scm', 'create_shipment', { p_purchase_order_id: id, p_lines: body.lines || [], p_vehicle: body, p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey) });
+  }
+
+  async consignment(user: AuthenticatedUser, id: string, body: Row) {
+    this.write(user);
+    if (!body.documentVersionId) throw new BadRequestException('Consignment document version is required');
+    if (!body.consignmentNumber?.trim()) throw new BadRequestException('Consignment number is required');
+    const { data: po, error: poError } = await this.sb.schema('scm').from('purchase_orders').select('id').eq('id', id).eq('company_id', user.companyId).maybeSingle();
+    if (poError) throw new BadRequestException(poError.message);
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const { data: document, error: documentError } = await this.sb.schema('documents').from('document_versions').select('id').eq('id', body.documentVersionId).eq('company_id', user.companyId).maybeSingle();
+    if (documentError) throw new BadRequestException(documentError.message);
+    if (!document) throw new BadRequestException('Consignment document does not belong to this company');
+    const extracted = body.extracted || {};
+    const { data, error } = await this.sb.schema('scm').from('consignments').insert({
+      company_id: user.companyId,
+      purchase_order_id: id,
+      shipment_id: body.shipmentId || null,
+      document_version_id: body.documentVersionId,
+      consignment_number: body.consignmentNumber.trim(),
+      source_name: body.sourceName || extracted.sourceAddress || null,
+      destination_name: body.destinationName || extracted.destination || extracted.destinationAddress || null,
+      delivery_at: body.deliveryAt || null,
+      total_quantity: body.totalQuantity == null ? extracted.totalQuantity || null : Number(body.totalQuantity),
+      total_value: body.totalValue == null ? extracted.totalValue || null : Number(body.totalValue),
+      currency: body.currency || extracted.currency || 'INR',
+      status: 'RECEIVED',
+      extracted,
+      created_by: user.id,
+    }).select().single();
+    const result = this.result(data, error);
+    await this.auditMutation(user, 'CONSIGNMENT_RECORDED', 'SCM_CONSIGNMENT', result.id, null, result);
+    return result;
   }
 
   async dispatch(user: AuthenticatedUser, id: string, idempotencyKey?: string) {
