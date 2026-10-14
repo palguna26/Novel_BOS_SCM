@@ -50,21 +50,38 @@ export class AppService {
   }
 
   private async rows(schema: string, table: string, companyId: string, order?: string) {
-    let query = this.sb.schema(schema).from(table).select('*').eq('company_id', companyId);
-    if (order) query = query.order(order, { ascending: false });
-    const { data, error } = await query;
-    return this.result<Row[]>(data, error) || [];
+    const result: Row[] = [];
+    const pageSize = 500;
+    for (let offset = 0; ; offset += pageSize) {
+      let query = this.sb.schema(schema).from(table).select('*').eq('company_id', companyId);
+      if (order) query = query.order(order, { ascending: false });
+      if (table === 'po_gate_state_v') query = query.order('purchase_order_id');
+      else if (table === 'inventory_summary_v') query = query.order('item_id').order('site_id').order('uom_id');
+      else query = query.order('id');
+      const { data, error } = await query.range(offset, offset + pageSize - 1);
+      const page = this.result<Row[]>(data, error) || [];
+      result.push(...page);
+      if (page.length < pageSize) return result;
+    }
+  }
+
+  private async ownedRow(user: AuthenticatedUser, schema: string, table: string, id: string, columns = 'id'): Promise<Row> {
+    const { data, error } = await this.sb.schema(schema).from(table).select(columns).eq('id', id).eq('company_id', user.companyId).maybeSingle();
+    if (error) throw new BadRequestException(error.message);
+    if (!data) throw new BadRequestException(`${table} record does not belong to this company`);
+    return data as Row;
   }
 
   async listPos(user: AuthenticatedUser): Promise<Row[]> {
     const companyId = user.companyId;
-    const [pos, lines, channels, sites, gates, appointments, reservations, reservationLines, shipments, shipmentLines, events, pods, podLines, invoices, exceptions, consignments] = await Promise.all([
+    const [pos, lines, channels, sites, gates, appointments, appointmentDocuments, reservations, reservationLines, shipments, shipmentLines, events, pods, podLines, invoices, exceptions, consignments] = await Promise.all([
       this.rows('scm', 'purchase_orders', companyId, 'created_at'),
       this.rows('scm', 'purchase_order_lines', companyId),
       this.rows('master_data', 'channels', companyId),
       this.rows('master_data', 'sites', companyId),
       this.rows('scm', 'po_gate_state_v', companyId),
       this.rows('scm', 'appointments', companyId),
+      this.rows('scm', 'appointment_documents', companyId),
       this.rows('inventory', 'reservations', companyId),
       this.rows('inventory', 'reservation_lines', companyId),
       this.rows('scm', 'shipments', companyId),
@@ -81,12 +98,14 @@ export class AppService {
       this.rows('documents', 'document_versions', companyId),
     ]);
     const itemById = new Map(items.map(x => [x.id, x]));
+    const documentById = new Map(documents.map(x => [x.id, x]));
     const shipmentById = new Map(shipments.map(x => [x.id, x]));
 
     return pos.map(po => {
-      const poLines = lines.filter(x => x.purchase_order_id === po.id).map(line => {
+      const poLines = lines.filter(x => x.purchase_order_id === po.id && x.active !== false).map(line => {
         const relatedShipments = shipmentLines.filter(x => x.purchase_order_line_id === line.id);
-        const reservationLine = reservationLines.find(x => x.purchase_order_line_id === line.id);
+        const activeReservationForLine = reservations.find(x => x.purchase_order_id === po.id && ['ACTIVE', 'PARTIALLY_DISPATCHED'].includes(x.status));
+        const reservationLine = reservationLines.find(x => x.purchase_order_line_id === line.id && x.reservation_id === activeReservationForLine?.id);
         const ordered = Number(line.ordered_quantity);
         const allocated = Number(reservationLine?.reserved_quantity || 0);
         const planned = relatedShipments
@@ -123,6 +142,7 @@ export class AppService {
         truckNumber: shipment.truck_number,
         driverName: shipment.driver_name,
         driverPhone: shipment.driver_phone,
+        lrFilename: documentById.get(shipment.lr_document_version_id)?.filename || null,
         actualDispatch: shipment.actual_dispatch_at,
         expectedArrival: shipment.expected_arrival_at,
         lines: shipmentLines.filter(x => x.shipment_id === shipment.id),
@@ -130,16 +150,25 @@ export class AppService {
       }));
       const poPods = pods.filter(x => x.purchase_order_id === po.id).map(pod => ({
         ...pod,
+        filename: documentById.get(pod.document_version_id)?.filename || null,
         receiver: pod.receiver_name,
         lines: podLines.filter(x => x.pod_id === pod.id),
+        shipmentIds: [...new Set(podLines.filter(x => x.pod_id === pod.id).map(x => shipmentLines.find(line => line.id === x.shipment_line_id)?.shipment_id).filter(Boolean))],
       }));
       const activeReservation = reservations.find(x => x.purchase_order_id === po.id && ['ACTIVE', 'PARTIALLY_DISPATCHED'].includes(x.status));
-      const activeAppointment = appointments.find(x => x.purchase_order_id === po.id && x.active);
+      const poAppointments: Row[] = appointments.filter(x => x.purchase_order_id === po.id).map(appointment => ({
+        ...appointment,
+        files: appointmentDocuments.filter(x => x.appointment_id === appointment.id).map(x => ({ documentVersionId: x.document_version_id, filename: documentById.get(x.document_version_id)?.filename || null })),
+      }));
+      const activeAppointment = poAppointments.find(x => x.active);
+      const appointmentFiles = activeAppointment?.files || [];
       return {
         ...po,
         externalId: po.external_id,
         poDate: po.po_date,
         totalValue: Number(po.total_value),
+        customer: po.customer_name,
+        acceptedAt: gates.find(x => x.purchase_order_id === po.id)?.accepted_at || null,
         destination: po.destination_name,
         destinationAddress: po.destination_address || po.destination_name,
         destinationCity: po.destination_city || null,
@@ -153,15 +182,16 @@ export class AppService {
         createdAt: po.created_at,
         platform: channels.find(x => x.id === po.channel_id),
         warehouse: sites.find(x => x.id === po.source_site_id),
-        document: documents.find(x => x.id === po.source_document_version_id) || null,
+        document: documentById.get(po.source_document_version_id) || null,
         gate: gates.find(x => x.purchase_order_id === po.id),
-        appointment: activeAppointment ? { ...activeAppointment, appointmentId: activeAppointment.appointment_number, location: activeAppointment.location_name, sourceAddress: activeAppointment.source_address, sourceCity: activeAppointment.source_city, sourceState: activeAppointment.source_state, sourcePostalCode: activeAppointment.source_postal_code, destinationAddress: activeAppointment.destination_address, destinationCity: activeAppointment.destination_city, destinationState: activeAppointment.destination_state, destinationPostalCode: activeAppointment.destination_postal_code, facilityName: activeAppointment.facility_name, resolutionStatus: activeAppointment.resolution_status, matchDetails: activeAppointment.match_details } : null,
+        appointment: activeAppointment ? { ...activeAppointment, files: appointmentFiles, filename: appointmentFiles[0]?.filename || null, documentVersionId: appointmentFiles[0]?.documentVersionId || null, appointmentId: activeAppointment.appointment_number, appointmentAt: activeAppointment.appointment_at, location: activeAppointment.location_name, sourceAddress: activeAppointment.source_address, sourceCity: activeAppointment.source_city, sourceState: activeAppointment.source_state, sourcePostalCode: activeAppointment.source_postal_code, destinationAddress: activeAppointment.destination_address, destinationCity: activeAppointment.destination_city, destinationState: activeAppointment.destination_state, destinationPostalCode: activeAppointment.destination_postal_code, facilityName: activeAppointment.facility_name, resolutionStatus: activeAppointment.resolution_status, matchDetails: activeAppointment.match_details } : null,
+        appointmentHistory: poAppointments.filter(x => !x.active),
         reservation: activeReservation || null,
         lines: poLines,
         shipments: poShipments,
-        consignments: consignments.filter(x => x.purchase_order_id === po.id),
+        consignments: consignments.filter(x => x.purchase_order_id === po.id).map(consignment => ({ ...consignment, filename: documentById.get(consignment.document_version_id)?.filename || null })),
         pods: poPods,
-        invoice: invoices.find(x => x.purchase_order_id === po.id) || null,
+        invoice: (() => { const invoice = invoices.find(x => x.purchase_order_id === po.id); return invoice ? { ...invoice, filename: documentById.get(invoice.document_version_id)?.filename || null } : null; })(),
         exceptions: exceptions.filter(x => x.purchase_order_id === po.id),
       } as Row;
     });
@@ -193,18 +223,32 @@ export class AppService {
   }
 
   async inventory(user: AuthenticatedUser) {
-    const [rows, items, sites] = await Promise.all([
+    const [rows, items, sites, shipments, shipmentLines, poLines] = await Promise.all([
       this.rows('inventory', 'inventory_summary_v', user.companyId),
       this.rows('master_data', 'items', user.companyId),
       this.rows('master_data', 'sites', user.companyId),
+      this.rows('scm', 'shipments', user.companyId),
+      this.rows('scm', 'shipment_lines', user.companyId),
+      this.rows('scm', 'purchase_order_lines', user.companyId),
     ]);
+    const shipmentsById = new Map(shipments.map(shipment => [shipment.id, shipment]));
+    const poLinesById = new Map(poLines.map(line => [line.id, line]));
+    const transitBySiteItem = new Map<string, number>();
+    for (const line of shipmentLines) {
+      const shipment = shipmentsById.get(line.shipment_id);
+      const poLine = poLinesById.get(line.purchase_order_line_id);
+      if (!shipment || !poLine || shipment.status === 'CANCELLED') continue;
+      const quantity = Math.max(0, Number(line.dispatched_quantity || 0) - Number(line.delivered_quantity || 0) - Number(line.damaged_quantity || 0) - Number(line.rejected_quantity || 0));
+      const key = `${shipment.source_site_id}:${poLine.item_id}`;
+      transitBySiteItem.set(key, (transitBySiteItem.get(key) || 0) + quantity);
+    }
     return rows
       .filter(row => sites.find(site => site.id === row.site_id && site.site_type === 'WAREHOUSE' && site.active !== false))
       .map(row => ({
       ...row,
       skuId: row.item_id,
       warehouseId: row.site_id,
-      inTransit: Number(row.in_transit),
+      inTransit: transitBySiteItem.get(`${row.site_id}:${row.item_id}`) || 0,
       physical: Number(row.physical),
       blocked: Number(row.blocked),
       released: Number(row.released),
@@ -246,7 +290,7 @@ export class AppService {
     ]);
     return events.slice(0, 100).map(event => ({
       ...event,
-      user: users.data?.find(x => x.id === event.actor_id),
+      user: (() => { const actor = users.data?.find(x => x.id === event.actor_id); return actor ? { ...actor, name: actor.display_name || actor.email } : null; })(),
       recordType: event.entity_type,
       recordId: event.entity_id,
       createdAt: event.occurred_at,
@@ -259,7 +303,7 @@ export class AppService {
     this.approve(user);
     const uomId = body.uomId || (await this.sb.schema('master_data').from('uoms').select('id').eq('active', true).limit(1).single()).data?.id;
     if (!body.code || !body.name || !uomId) throw new BadRequestException('Code, name and a UOM are required');
-    const { data, error } = await this.sb.schema('master_data').from('items').insert({ company_id: user.companyId, code: body.code, name: body.name, item_class: body.itemClass || 'FG', base_uom_id: uomId, lifecycle_status: 'DRAFT' }).select().single();
+    const { data, error } = await this.sb.schema('master_data').from('items').insert({ company_id: user.companyId, code: body.code, name: body.name, item_class: body.itemClass || 'FG', base_uom_id: uomId, lifecycle_status: 'ACTIVE' }).select().single();
     const result = this.result(data, error);
     await this.auditMutation(user, 'SKU_CREATED', 'MASTER_DATA_ITEM', result.id, null, result);
     return result;
@@ -268,14 +312,12 @@ export class AppService {
   async createWarehouse(user: AuthenticatedUser, body: Row) {
     this.approve(user);
     if (!body.code?.trim() || !body.name?.trim() || !body.city?.trim()) throw new BadRequestException('Warehouse code, name and city are required');
-    const { data, error } = await this.sb.schema('master_data').from('sites').insert({ company_id: user.companyId, code: body.code, name: body.name, city: body.city, state: body.state, address_line1: body.addressLine1 || null, address_line2: body.addressLine2 || null, postal_code: body.postalCode || null, site_type: 'WAREHOUSE', active: body.active !== false }).select().single();
-    const result = this.result(data, error);
-    await this.auditMutation(user, 'WAREHOUSE_CREATED', 'MASTER_DATA_SITE', result.id, null, result);
-    return result;
+    return this.rpc('master_data', 'create_warehouse_with_stock_location', { p_payload: { ...body, companyId: user.companyId }, p_actor_id: user.id });
   }
 
   async updateSku(user: AuthenticatedUser, id: string, body: Row) {
-    return this.updateCompanyRow(user, 'master_data', 'items', id, body, ['code', 'name', 'item_class', 'brand', 'category', 'variant', 'base_uom_id', 'lifecycle_status', 'active_from', 'active_to']);
+    const normalized = { ...body, item_class: body.itemClass ?? body.item_class, base_uom_id: body.uomId ?? body.base_uom_id };
+    return this.updateCompanyRow(user, 'master_data', 'items', id, normalized, ['code', 'name', 'item_class', 'brand', 'category', 'variant', 'base_uom_id', 'lifecycle_status', 'active_from', 'active_to']);
   }
 
   async createPlatform(user: AuthenticatedUser, body: Row) {
@@ -322,6 +364,8 @@ export class AppService {
   async createLocation(user: AuthenticatedUser, body: Row) {
     this.approve(user);
     if (!body.warehouseId || !body.code || !body.name || !body.locationType) throw new BadRequestException('Warehouse, code, name and location type are required');
+    const site = await this.ownedRow(user, 'master_data', 'sites', body.warehouseId, 'id,site_type');
+    if (site.site_type !== 'WAREHOUSE') throw new BadRequestException('Stock locations require a warehouse site');
     const { data, error } = await this.sb.schema('master_data').from('locations').insert({ company_id: user.companyId, site_id: body.warehouseId, code: body.code, name: body.name, location_type: body.locationType, barcode: body.barcode || null, virtual: Boolean(body.virtual) }).select().single();
     const result = this.result(data, error);
     await this.auditMutation(user, 'LOCATION_CREATED', 'MASTER_DATA_LOCATION', result.id, null, result);
@@ -336,12 +380,19 @@ export class AppService {
     this.approve(user);
     if (body.mappingType === 'CHANNEL_SKU') {
       if (!body.skuId || !body.channelId || !body.value) throw new BadRequestException('Channel, SKU and external code are required');
+      await Promise.all([this.ownedRow(user, 'master_data', 'items', body.skuId), this.ownedRow(user, 'master_data', 'channels', body.channelId)]);
       const { data, error } = await this.sb.schema('master_data').from('item_identifiers').insert({ company_id: user.companyId, item_id: body.skuId, channel_id: body.channelId, identifier_type: 'CHANNEL_SKU', value: body.value }).select().single();
       const result = this.result(data, error);
       await this.auditMutation(user, 'CHANNEL_SKU_MAPPING_CREATED', 'MASTER_DATA_ITEM_IDENTIFIER', result.id, null, result);
       return result;
     }
     if (!body.channelId || !body.destinationKey || !body.destinationName || !body.warehouseId || !body.locationId) throw new BadRequestException('Channel, destination, warehouse and location are required');
+    const [site, location] = await Promise.all([
+      this.ownedRow(user, 'master_data', 'sites', body.warehouseId, 'id,site_type'),
+      this.ownedRow(user, 'master_data', 'locations', body.locationId, 'id,site_id'),
+      this.ownedRow(user, 'master_data', 'channels', body.channelId),
+    ]);
+    if (site.site_type !== 'WAREHOUSE' || location.site_id !== site.id) throw new BadRequestException('Stock location must belong to the selected warehouse');
     const { data, error } = await this.sb.schema('master_data').from('destination_mappings').insert({ company_id: user.companyId, channel_id: body.channelId, destination_key: body.destinationKey, destination_name: body.destinationName, fc_code: body.fcCode || null, source_site_id: body.warehouseId, source_location_id: body.locationId }).select().single();
     const result = this.result(data, error);
     await this.auditMutation(user, 'DESTINATION_MAPPING_CREATED', 'MASTER_DATA_DESTINATION_MAPPING', result.id, null, result);
@@ -358,6 +409,8 @@ export class AppService {
     this.approve(user);
     const destinationCity = body.destinationCity || body.destinationKey;
     if (!body.warehouseId || !destinationCity || Number(body.transitHours) <= 0) throw new BadRequestException('Warehouse, destination city and transit hours are required');
+    const site = await this.ownedRow(user, 'master_data', 'sites', body.warehouseId, 'id,site_type');
+    if (site.site_type !== 'WAREHOUSE') throw new BadRequestException('Route source must be a warehouse');
     const { data, error } = await this.sb.schema('master_data').from('routes').insert({ company_id: user.companyId, source_site_id: body.warehouseId, destination_key: destinationCity, destination_city: destinationCity, transit_hours: Number(body.transitHours), estimated_cost: Number(body.estimatedCost || 0), currency: body.currency || 'INR' }).select().single();
     const result = this.result(data, error);
     await this.auditMutation(user, 'ROUTE_CREATED', 'MASTER_DATA_ROUTE', result.id, null, result);
@@ -433,6 +486,34 @@ export class AppService {
     return this.rpc('scm', 'create_purchase_order', { p_payload: payload, p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey) });
   }
 
+  async updatePo(user: AuthenticatedUser, id: string, body: Row, idempotencyKey?: string) {
+    this.write(user);
+    if (body.lines !== undefined && (!Array.isArray(body.lines) || body.lines.length === 0)) {
+      throw new BadRequestException('A PO needs at least one SKU line');
+    }
+    const payload = {
+      ...body,
+      ...(body.lines === undefined ? {} : {
+        lines: body.lines.map((line: Row) => ({
+          itemId: line.itemId || line.skuId,
+          ordered: Number(line.ordered),
+          unitPrice: Number(line.unitPrice || 0),
+          channelItemCode: line.channelItemCode || null,
+          description: line.description || null,
+          taxRate: Number(line.taxRate || 0),
+          uomId: line.uomId || null,
+          deliveryWindowStart: line.deliveryWindowStart || null,
+          deliveryWindowEnd: line.deliveryWindowEnd || null,
+          minimumResidualShelfLifeDays: Number(line.minimumResidualShelfLifeDays || 0),
+        })),
+      }),
+    };
+    return this.rpc('scm', 'update_purchase_order', {
+      p_purchase_order_id: id, p_payload: payload, p_actor_id: user.id,
+      p_idempotency_key: this.key(idempotencyKey),
+    });
+  }
+
   async acceptPo(user: AuthenticatedUser, id: string, idempotencyKey?: string) {
     this.write(user);
     return this.rpc('scm', 'record_acceptance', { p_purchase_order_id: id, p_decision: 'ACCEPTED', p_reason: null, p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey) });
@@ -447,7 +528,32 @@ export class AppService {
   async appointment(user: AuthenticatedUser, id: string, body: Row, idempotencyKey?: string) {
     this.write(user);
     if (!body.documentVersionId) throw new BadRequestException('Appointment document version is required');
-    return this.rpc('scm', 'record_appointment', { p_purchase_order_id: id, p_appointment_number: body.appointmentId, p_appointment_at: body.appointmentAt, p_location_name: body.location, p_match_status: body.matchStatus || 'MATCHED', p_document_version_id: body.documentVersionId, p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey), p_match_details: body.matchDetails || {} });
+    const { data: po, error: poError } = await this.sb.schema('scm').from('purchase_orders').select('external_id,destination_key').eq('id', id).eq('company_id', user.companyId).maybeSingle();
+    if (poError) throw new BadRequestException(poError.message);
+    if (!po) throw new BadRequestException('Purchase order not found');
+    const { data: run, error: runError } = await this.sb.schema('documents').from('extraction_runs').select('raw_output').eq('company_id', user.companyId).eq('document_version_id', body.documentVersionId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (runError) throw new BadRequestException(runError.message);
+    if (!run) throw new BadRequestException('Appointment extraction was not found');
+    const extracted = run.raw_output || {};
+    const linkedPoIds = Array.isArray(extracted.linkedPoIds) ? extracted.linkedPoIds.map((value: unknown) => String(value).trim().toUpperCase()) : [];
+    const poId = String(po.external_id).trim().toUpperCase();
+    const correctedPoId = String(body.linkedPoId || '').trim().toUpperCase();
+    const sourcePoIds = String(extracted.text || '').toUpperCase().split(/[^A-Z0-9-]+/);
+    if ((body.matchStatus || 'MATCHED') === 'MATCHED') {
+      if (correctedPoId && correctedPoId !== poId) throw new BadRequestException('The PO number on the letter must match this PO');
+      if (correctedPoId && !sourcePoIds.includes(correctedPoId)) throw new BadRequestException('The corrected PO number was not found in the appointment PDF text');
+      if (!correctedPoId && !linkedPoIds.includes(poId)) throw new BadRequestException('Appointment letter does not list this PO number');
+    }
+    const documentFc = String(extracted.fcCode || '').trim().toUpperCase();
+    const poFc = String(po.destination_key || '').trim().toUpperCase();
+    if (documentFc && /^[A-Z]{3,4}\d/.test(poFc) && documentFc !== poFc) throw new BadRequestException('Appointment FC does not match the PO destination');
+    const matchDetails = { ...(body.matchDetails || {}) };
+    if (correctedPoId) matchDetails.linkedPoId = correctedPoId;
+    else delete matchDetails.linkedPoId;
+    for (const field of ['sourceAddress', 'destinationAddress']) {
+      if (matchDetails[field] && (String(matchDetails[field]).length > 300 || /Vendor Central|All Rights Reserved|https?:\/\//i.test(String(matchDetails[field])))) delete matchDetails[field];
+    }
+    return this.rpc('scm', 'record_appointment', { p_purchase_order_id: id, p_appointment_number: body.appointmentId, p_appointment_at: body.appointmentAt, p_location_name: body.location, p_match_status: body.matchStatus || 'MATCHED', p_document_version_id: body.documentVersionId, p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey), p_match_details: matchDetails });
   }
 
   async shipment(user: AuthenticatedUser, id: string, body: Row, idempotencyKey?: string) {
@@ -459,12 +565,18 @@ export class AppService {
     this.write(user);
     if (!body.documentVersionId) throw new BadRequestException('Consignment document version is required');
     if (!body.consignmentNumber?.trim()) throw new BadRequestException('Consignment number is required');
+    if (!body.shipmentId) throw new BadRequestException('Select a shipment for this consignment');
     const { data: po, error: poError } = await this.sb.schema('scm').from('purchase_orders').select('id').eq('id', id).eq('company_id', user.companyId).maybeSingle();
     if (poError) throw new BadRequestException(poError.message);
     if (!po) throw new BadRequestException('Purchase order not found');
     const { data: document, error: documentError } = await this.sb.schema('documents').from('document_versions').select('id').eq('id', body.documentVersionId).eq('company_id', user.companyId).maybeSingle();
     if (documentError) throw new BadRequestException(documentError.message);
     if (!document) throw new BadRequestException('Consignment document does not belong to this company');
+    if (body.shipmentId) {
+      const { data: shipment, error: shipmentError } = await this.sb.schema('scm').from('shipments').select('id').eq('id', body.shipmentId).eq('purchase_order_id', id).eq('company_id', user.companyId).maybeSingle();
+      if (shipmentError) throw new BadRequestException(shipmentError.message);
+      if (!shipment) throw new BadRequestException('Shipment does not belong to this PO');
+    }
     const extracted = body.extracted || {};
     const { data, error } = await this.sb.schema('scm').from('consignments').insert({
       company_id: user.companyId,
@@ -494,6 +606,7 @@ export class AppService {
 
   async shipmentEvent(user: AuthenticatedUser, id: string, body: Row, idempotencyKey?: string) {
     this.write(user);
+    if (['DELIVERED', 'CANCELLED', 'PARTIALLY_DELIVERED', 'RETURNED'].includes(body.status)) throw new BadRequestException('Use POD or the stock reversal workflow to change delivery or cancellation status');
     return this.rpc('scm', 'record_shipment_event', { p_shipment_id: id, p_status: body.status, p_event_at: body.eventAt || new Date().toISOString(), p_location_name: body.location || null, p_notes: body.notes || null, p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey) });
   }
 
@@ -506,7 +619,24 @@ export class AppService {
   async pod(user: AuthenticatedUser, id: string, body: Row, idempotencyKey?: string) {
     this.write(user);
     if (!body.documentVersionId) throw new BadRequestException('POD document version is required');
-    return this.rpc('scm', 'record_pod', { p_purchase_order_id: id, p_document_version_id: body.documentVersionId, p_delivery_at: body.deliveryAt || new Date().toISOString(), p_receiver_name: body.receiver, p_lines: body.lines || [], p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey) });
+    if (!body.shipmentId) throw new BadRequestException('Select a shipment for the POD');
+    const shipment = await this.ownedRow(user, 'scm', 'shipments', body.shipmentId, 'id,purchase_order_id,status');
+    if (shipment.purchase_order_id !== id || !['DISPATCHED', 'IN_TRANSIT', 'ARRIVED', 'UNLOADING', 'PARTIALLY_DELIVERED', 'DELIVERY_ISSUE'].includes(shipment.status)) {
+      throw new BadRequestException('POD requires a dispatched shipment for this PO');
+    }
+    const { data: existingPod, error: existingError } = await this.sb.schema('scm').from('pods')
+      .select('id').eq('company_id', user.companyId).eq('document_version_id', body.documentVersionId).maybeSingle();
+    if (existingError) throw new BadRequestException(existingError.message);
+    if (existingPod) throw new BadRequestException('This POD file is already attached to a shipment');
+    const { data, error } = await this.sb.schema('scm').from('shipment_lines')
+      .select('id,dispatched_quantity,delivered_quantity,damaged_quantity,rejected_quantity')
+      .eq('company_id', user.companyId).eq('shipment_id', shipment.id);
+    const lines = this.result<Row[]>(data, error).map(line => ({
+      shipmentLineId: line.id,
+      confirmed: Math.max(0, Number(line.dispatched_quantity || 0) - Number(line.delivered_quantity || 0) - Number(line.damaged_quantity || 0) - Number(line.rejected_quantity || 0)),
+    })).filter(line => line.confirmed > 0);
+    if (!lines.length) throw new BadRequestException('This shipment has no remaining dispatched units to deliver');
+    return this.rpc('scm', 'record_pod', { p_purchase_order_id: id, p_document_version_id: body.documentVersionId, p_delivery_at: new Date().toISOString(), p_receiver_name: null, p_lines: lines, p_actor_id: user.id, p_idempotency_key: this.key(idempotencyKey) });
   }
 
   async shortClose(user: AuthenticatedUser, id: string, body: Row, idempotencyKey?: string) {

@@ -61,17 +61,33 @@ export function mergeDocumentFallback(primary: NormalizedDocument, fallback: Nor
   for (const key of scalarKeys) {
     if (merged[key] === null || merged[key] === undefined || merged[key] === '') merged[key] = fallback[key];
   }
-  const fallbackByIdentifier = new Map<string, ExtractedLine>();
+  // A PO number read from the document text is stronger evidence than an AI
+  // list, which may be empty or contain a number absent from the letter.
+  if (fallback.linkedPoIds.length) merged.linkedPoIds = fallback.linkedPoIds;
+  // AI output can include a flattened table or the PDF viewer footer in a
+  // plausible-looking address/customer. Prefer the bounded rules result then.
+  for (const key of ['sourceAddress', 'destinationAddress', 'destination', 'customer'] as const) {
+    const value = merged[key];
+    if (typeof value !== 'string') continue;
+    const cleaned = key === 'customer' ? cleanCustomer(value) : cleanAddress(value);
+    if (cleaned !== value.trim()) merged[key] = cleaned || fallback[key];
+  }
+  const fallbackByIdentifier = new Map<string, ExtractedLine[]>();
   for (const line of fallback.lines) {
     for (const value of [line.asin, line.channelItemCode, line.ean]) {
-      if (value) fallbackByIdentifier.set(String(value).trim().toLowerCase(), line);
+      if (value) {
+        const key = String(value).trim().toLowerCase();
+        fallbackByIdentifier.set(key, [...(fallbackByIdentifier.get(key) || []), line]);
+      }
     }
   }
+  const usedFallback = new Set<ExtractedLine>();
   merged.lines = (primary.lines.length ? primary.lines : fallback.lines).map((line: ExtractedLine, index: number) => {
     const fallbackLine = [line.asin, line.channelItemCode, line.ean]
-      .map(value => value ? fallbackByIdentifier.get(String(value).trim().toLowerCase()) : undefined)
-      .find(Boolean) || fallback.lines[index];
+      .map(value => value ? fallbackByIdentifier.get(String(value).trim().toLowerCase())?.find(candidate => !usedFallback.has(candidate)) : undefined)
+      .find(Boolean) || ((!line.asin && !line.channelItemCode && !line.ean) ? fallback.lines[index] : undefined);
     if (!fallbackLine) return line;
+    usedFallback.add(fallbackLine);
     const result: any = { ...line };
     for (const key of ['channelItemCode','asin','ean','hsn','description','ordered','approved','pending','unitPrice','taxRate','mrp','total']) {
       if (result[key] === null || result[key] === undefined || result[key] === '') result[key] = (fallbackLine as any)[key];
@@ -99,11 +115,16 @@ const number = (value:string|null) => {
 };
 
 const unique = (values:(string|null|undefined)[]) => [...new Set(values.filter(Boolean) as string[])];
+const cleanAddress = (value: string | null) => {
+  const cleaned = value?.split(/\b(?:PO items|ASIN External Id|All Rights Reserved|Vendor Central)\b|\b(?:ASN|Appointment Id)\s*:|©|https?:\/\//i)[0]?.trim();
+  return cleaned && cleaned.length <= 500 ? cleaned : null;
+};
+const cleanCustomer = (value: string | null) => value?.split(/\b(?:Items Quantity|PO items|Delivery Address|ASIN External Id|Submitted Total cost)\b/i)[0]?.trim() || null;
 
 function detect(text:string):{platform:DocumentPlatform;kind:DocumentKind} {
   const upper = text.toUpperCase();
   const platform:DocumentPlatform =
-    /AMAZON|RK WORLDINFOCOM|VENDOR CENTRAL|DESTINATION FC/.test(upper) ? 'AMAZON_RK' :
+    /AMAZON|RK WORLDINFOCOM|VENDOR CENTRAL|DESTINATION FC/.test(upper) || (/\bB0[A-Z0-9]{8}\b/.test(upper) && /DELIVERY WINDOW|SHIP TO LOCATION/.test(upper)) ? 'AMAZON_RK' :
     /FLIPKART INDIA|FLS[A-Z0-9]+|CONSIGNMENT PRODUCTS/.test(upper) ? 'FLIPKART' :
     /BLINKIT|BLINK COMMERCE|SELLER HUB|R\.O\. NUMBER/.test(upper) ? 'BLINKIT' : 'UNKNOWN';
   const kind:DocumentKind =
@@ -130,17 +151,18 @@ function extractPoIds(text:string) {
 
 function extractAmazonLines(text:string):ExtractedLine[] {
   const starts = [...text.matchAll(/\b(B0[A-Z0-9]{8})\b/g)];
-  const seen = new Set<string>();
-  const uniqueStarts = starts.filter(match => {
-    const asin = match[1].toUpperCase();
-    if (seen.has(asin)) return false;
-    seen.add(asin);
-    return true;
+  const uniqueStarts = starts.filter((match, index) => {
+    const next = starts[index + 1];
+    const segment = text.slice(match.index!, next?.index ?? text.length);
+    // Amazon's PDF table often places "Delivery" and "window" on separate
+    // text rows. Treat all whitespace as layout noise when identifying rows.
+    return /Delivery\s+window/i.test(segment);
   });
   return uniqueStarts.map((match,index) => {
     const segment = text.slice(match.index!, uniqueStarts[index+1]?.index ?? text.length);
-    const quantities = segment.match(/Delivery window[^\n]*?\b(\d[\d,]*)\s+0\s+(\d[\d,]*)\s+0\s+(\d[\d,]*)\s+(\d[\d,]*(?:\.\d+)?)\s+INR/i)
-      || segment.match(/Delivery window[^\n]*?\b(\d[\d,]*)\s+0\s+(\d[\d,]*)\s+\d[\d,]*\s+\d[\d,]*/i);
+    const layoutNormalized = segment.replace(/\s+/g, ' ').trim();
+    const quantities = layoutNormalized.match(/Delivery\s+window.*?\b(\d[\d,]*)\s+0\s+(\d[\d,]*)\s+0\s+(\d[\d,]*)\s+(\d[\d,]*(?:\.\d+)?)\s+INR/i)
+      || layoutNormalized.match(/Delivery\s+window.*?\b(\d[\d,]*)\s+0\s+(\d[\d,]*)\s+\d[\d,]*\s+\d[\d,]*/i);
     return {
       lineNumber:index+1,
       asin:match[1],
@@ -209,24 +231,24 @@ export function normalizeDocument(text:string):NormalizedDocument {
     /Consignment (?:ID|No|Number)\s*[:#-]?\s*([A-Z0-9-]+)/i,
     /Consignment\s*#\s*([A-Z0-9-]+)/i,
   ]);
-  const destination = first(cleaned,[
+  const destination = cleanAddress(first(cleaned,[
     /Ship to location\s+([^\n]+)/i,
     /Destination FC\s*:\s*([^\n]+)/i,
     /Delivered To\s*:\s*([^\n]+)/i,
     /(?:Destination|Facility|Location|Ship To)\s*:\s*([^\n]+)/i,
     /Ship To Address\s+Name\s+([^\n]+)/i,
     /Facility Name\s+([^\n]+)/i,
-  ]);
-  const sourceAddress = first(cleaned,[
+  ]));
+  const sourceAddress = cleanAddress(first(cleaned,[
     /Ship From Address\s*[:\n]+([\s\S]*?)(?=Ship To Address|Bill To Address|Destination FC|Appointment|$)/i,
     /Dispatch From\s*[:\n]+([\s\S]*?)(?=Ship To Address|Destination|Appointment|$)/i,
     /Source Warehouse Address\s*[:\n]+([\s\S]*?)(?=Destination|Appointment|$)/i,
-  ]);
-  const destinationAddress = first(cleaned,[
+  ]));
+  const destinationAddress = cleanAddress(first(cleaned,[
     /Ship To Address\s*[:\n]+([\s\S]*?)(?=Bill To Address|Appointment|$)/i,
     /Delivery Address\s*[:\n]+([\s\S]*?)(?=Appointment|$)/i,
     /Destination Address\s*[:\n]+([\s\S]*?)(?=Appointment|$)/i,
-  ]) || destination;
+  ]));
   const cityFromAddress = (address:string|null) => address?.match(/\b(Bengaluru|Bangalore|Mysuru|Mysore|Manesar|Gurugram|Gurgaon|Delhi|Mumbai|Pune|Hyderabad|Chennai|Kolkata)\b/i)?.[1] ?? null;
   const sourceCity = first(cleaned,[/Source City\s*[:\-]\s*([^\n]+)/i,/Dispatch City\s*[:\-]\s*([^\n]+)/i]) || cityFromAddress(sourceAddress);
   const destinationCity = first(cleaned,[/Destination City\s*[:\-]\s*([^\n]+)/i,/Ship To City\s*[:\-]\s*([^\n]+)/i]) || cityFromAddress(destinationAddress);
@@ -273,7 +295,7 @@ export function normalizeDocument(text:string):NormalizedDocument {
     consignmentId,
     appointmentAt:first(cleaned,[/Appointment (?:Time|Date and Time)\s*:\s*([^\n]+)/i,/Reporting date and time\s*[:\-]?\s*([^\n]+)/i]),
     destination,fcCode,sourceAddress,destinationAddress,sourceCity,destinationCity,sourceState,destinationState,sourcePostalCode,destinationPostalCode,facilityName,
-    customer:first(cleaned,[/Purchasing entity\s+([^\n]+)/i,/RETAILER NAME\s+([^\n]+)/i,/Issued by\s+([^\n]+)/i]),
+    customer:cleanCustomer(first(cleaned,[/Purchasing entity\s+([^\n]+)/i,/RETAILER NAME\s+([^\n]+)/i,/Issued by\s+([^\n]+)/i])),
     supplier:first(cleaned,[/Supplier Name\s+([^\n]+)/i,/SELLER\s*:\s*([^\n]+)/i,/Vendor\s+([A-Z0-9-]+)/i]),
     currency:first(cleaned,[/Currency\s*:\s*([A-Z]{3})/i]) ?? (totalValue !== null ? 'INR' : null),
     totalQuantity,totalValue,

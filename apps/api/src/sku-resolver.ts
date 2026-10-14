@@ -1,7 +1,7 @@
 import { ExtractedLine } from './document-extractor';
 
 export type SkuMaster = { id: string; code?: string; name?: string };
-export type SkuIdentifier = { item_id: string; value: string; identifier_type?: string };
+export type SkuIdentifier = { item_id: string; value: string; identifier_type?: string; channel_id?: string | null };
 
 export type ResolvedLine = ExtractedLine & {
   itemId?: string;
@@ -21,9 +21,10 @@ function similarity(left: unknown, right: unknown) {
   return common / Math.max(a.size, b.size);
 }
 
-export function resolveSkuLines(lines: ExtractedLine[], items: SkuMaster[], identifiers: SkuIdentifier[]): ResolvedLine[] {
+export function resolveSkuLines(lines: ExtractedLine[], items: SkuMaster[], identifiers: SkuIdentifier[], channelId?: string): ResolvedLine[] {
   const byIdentifier = new Map<string, SkuMaster>();
   for (const identifier of identifiers) {
+    if (identifier.channel_id && identifier.channel_id !== channelId) continue;
     const item = items.find(candidate => candidate.id === identifier.item_id);
     const key = normalize(identifier.value);
     if (item && key && !byIdentifier.has(key)) byIdentifier.set(key, item);

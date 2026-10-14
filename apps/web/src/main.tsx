@@ -43,10 +43,12 @@ import { Alert as UiAlert } from "./components/ui/alert";
 import { Progress as UiProgress } from "./components/ui/progress";
 import { Tabs as UiTabs } from "./components/ui/tabs";
 import { PoDetailsPage } from "./components/PoDetailsPage";
+import { EditPoModal } from "./components/EditPoModal";
 import { PoInboxAccordion } from "./components/PoInboxAccordion";
 import { SkuInventoryAccordion } from "./components/SkuInventoryAccordion";
 import { InventoryWorkspace } from "./components/InventoryWorkspace";
 import { DocumentWorkflowModal } from "./components/DocumentWorkflowModal";
+import { DocumentLink } from "./components/DocumentLink";
 import { ShipmentPlanModal } from "./components/ShipmentPlanModal";
 import { ShortCloseModal } from "./components/ShortCloseModal";
 import { CopilotPanel } from "./components/CopilotPanel";
@@ -217,6 +219,7 @@ function App() {
     [page, setPage] = useState("Overview"),
     [data, setData] = useState<any>({}),
     [selected, setSelected] = useState<PO | null>(null),
+    [editingPo, setEditingPo] = useState<PO | null>(null),
     [toast, setToast] = useState(""),
     [copilotOpen, setCopilotOpen] = useState(false),
     [globalSearch, setGlobalSearch] = useState(""),
@@ -421,8 +424,11 @@ function App() {
           po={selected}
           onClose={() => setSelected(null)}
           onAction={action}
+          onEdit={() => setEditingPo(selected)}
+          canEdit={user.role !== 'QC'}
         />
       )}
+      {editingPo && <EditPoModal po={editingPo} masters={data.masters || {}} onClose={() => setEditingPo(null)} onAction={action} onSaved={() => { setEditingPo(null); setSelected(null); }} />}
       {copilotOpen && <CopilotPanel api={api} page={page} context={selected ? { selectedPo: selected.externalId } : undefined} onClose={() => setCopilotOpen(false)} />}
     </div>
   );
@@ -480,21 +486,21 @@ function Dashboard({
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat
           label="Awaiting review"
-          value={counts.UNDER_REVIEW || counts.UPLOADED}
+          value={(counts.UNDER_REVIEW || 0) + (counts.UPLOADED || 0)}
           sub="Needs your attention"
           icon={ClipboardList}
           color="bg-emerald-100 text-emerald-700"
         />
         <Stat
-          label="Accepted POs"
-          value={counts.ACCEPTED || 0}
+          label="Ready to ship"
+          value={(counts.ACCEPTED || 0) + (counts.SHIPMENT_PLANNING || 0)}
           sub="Ready for fulfilment"
           icon={Archive}
           color="bg-blue-100 text-blue-700"
         />
         <Stat
           label="In transit"
-          value={counts.PARTIALLY_DISPATCHED || 0}
+          value={(counts.PARTIALLY_DISPATCHED || 0) + (counts.FULLY_DISPATCHED || 0)}
           sub="Shipments moving"
           icon={Truck}
           color="bg-amber-100 text-amber-700"
@@ -706,7 +712,7 @@ function Inbox({
               </Badge>
             </div>
             <div>
-              {p.status === "UNDER_REVIEW" && (
+              {(p.status === "UNDER_REVIEW" || p.status === "APPOINTMENT_MATCHED_AWAITING_ACCEPTANCE") && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1390,9 +1396,16 @@ function Inventory({ rows, onAction }: { rows: any[]; onAction: Function }) {
     </>
   );
 }
+function DetailItem({ label, value }: { label: string; value: React.ReactNode }) {
+  return <div className="rounded-xl border border-slate-100 bg-white p-3"><div className="text-xs text-slate-500">{label}</div><div className="mt-1 break-words text-sm font-medium text-slate-800">{value ?? "—"}</div></div>;
+}
+function displayDate(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString() : "—";
+}
 function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
-  const [podPo, setPodPo] = useState<PO | null>(null),
-    [createShipment, setCreateShipment] = useState(false);
+  const [podSelection, setPodSelection] = useState<{ po: PO; shipmentId: string } | null>(null),
+    [createShipment, setCreateShipment] = useState(false),
+    [expanded, setExpanded] = useState<string | null>(null);
   const items = pos.flatMap((p) =>
       (p.shipments || []).map((s: any) => ({
         ...s,
@@ -1421,41 +1434,49 @@ function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
           <span>PO</span>
           <span>Vehicle</span>
           <span>Status</span>
-          <span></span>
+          <span>Details</span>
         </div>
-        {items.map((s) => (
-          <div
-            className="grid min-w-[680px] grid-cols-5 px-5 py-5 border-t border-slate-50 items-center"
-            key={s.id}
-          >
-            <div className="mono font-semibold text-sm">{s.number}</div>
-            <div className="mono text-sm">{s.externalId}</div>
-            <div className="text-sm">{s.truckNumber || "Unassigned"}</div>
-            <Badge tone={s.status === "IN_TRANSIT" ? "amber" : "blue"}>
-              {s.status.replaceAll("_", " ")}
-            </Badge>
-            <span>
-              {s.status === "PLANNED" && (
-                <button
-                  onClick={() => onAction(`/api/shipments/${s.id}/dispatch`)}
-                  className="text-xs font-semibold text-emerald-700"
-                >
-                  Dispatch <ArrowUpRight size={14} className="inline" />
-                </button>
-              )}
-              {["DISPATCHED", "IN_TRANSIT", "ARRIVED", "UNLOADING"].includes(
-                s.status,
-              ) && (
-                <button
-                  onClick={() => setPodPo(s.po)}
-                  className="text-xs font-semibold text-emerald-700"
-                >
-                  Confirm POD
-                </button>
-              )}
-            </span>
-          </div>
-        ))}
+        {items.map((s) => {
+          const isExpanded = expanded === s.id;
+          const shipmentLines = s.lines || [];
+          const totals = shipmentLines.reduce((sum: { planned: number; dispatched: number; delivered: number }, line: any) => ({
+            planned: sum.planned + Number(line.planned_quantity || 0),
+            dispatched: sum.dispatched + Number(line.dispatched_quantity || 0),
+            delivered: sum.delivered + Number(line.delivered_quantity || 0),
+          }), { planned: 0, dispatched: 0, delivered: 0 });
+          const consignments = (s.po.consignments || []).filter((c: any) => c.shipment_id === s.id);
+          const pods = (s.po.pods || []).filter((p: any) => p.shipmentIds?.includes(s.id));
+          return <div key={s.id} className="border-t border-slate-100">
+            <button type="button" aria-expanded={isExpanded} aria-controls={`shipment-details-${s.id}`} onClick={() => setExpanded(isExpanded ? null : s.id)} className="grid w-full min-w-[680px] grid-cols-5 items-center px-5 py-5 text-left hover:bg-slate-50">
+              <span className="flex items-center gap-2 mono text-sm font-semibold">{isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}{s.number}</span>
+              <span className="mono text-sm">{s.externalId}</span>
+              <span className="text-sm">{s.truckNumber || "Unassigned"}</span>
+              <span><Badge tone={s.status === "DELIVERED" ? "green" : s.status === "IN_TRANSIT" ? "amber" : "blue"}>{s.status.replaceAll("_", " ")}</Badge></span>
+              <span className="text-xs font-semibold text-emerald-700">{isExpanded ? "Hide details" : "View details"}</span>
+            </button>
+            {isExpanded && <div id={`shipment-details-${s.id}`} className="min-w-[680px] border-t border-emerald-100 bg-emerald-50/30 px-5 py-5">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <DetailItem label="Platform" value={s.po.platform?.name || "—"} />
+                <DetailItem label="Source warehouse" value={s.po.warehouse?.name || "—"} />
+                <DetailItem label="Source" value={[s.sourceAddress, s.sourceCity].filter(Boolean).join(", ") || "—"} />
+                <DetailItem label="Destination" value={[s.destinationAddress || s.destination_name, s.destinationCity, s.destinationState, s.destinationPostalCode].filter(Boolean).join(", ") || "—"} />
+                <DetailItem label="Truck type" value={s.truck_type || "—"} />
+                <DetailItem label="Driver" value={s.driverName || "—"} />
+                <DetailItem label="Driver phone" value={s.driverPhone || "—"} />
+                <DetailItem label="Planned dispatch" value={displayDate(s.planned_dispatch_at)} />
+                <DetailItem label="Actual dispatch" value={displayDate(s.actual_dispatch_at)} />
+                <DetailItem label="Expected arrival" value={displayDate(s.expected_arrival_at)} />
+                <DetailItem label="Actual arrival" value={displayDate(s.actual_arrival_at)} />
+                <DetailItem label="Estimated cost" value={`${s.currency || "INR"} ${Number(s.estimated_cost || 0).toLocaleString()}`} />
+              </div>
+              <div className="mt-5 text-sm font-semibold">Shipment lines <span className="font-normal text-slate-500">· Planned {totals.planned} · Dispatched {totals.dispatched} · Delivered {totals.delivered}</span></div>
+              <div className="mt-2 overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="w-full min-w-[580px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">SKU</th><th>Planned</th><th>Dispatched</th><th>Delivered</th><th>Remaining</th></tr></thead><tbody>{shipmentLines.map((line: any) => { const poLine = (s.po.lines || []).find((item: any) => item.id === line.purchase_order_line_id); return <tr key={line.id} className="border-t border-slate-100"><td className="px-3 py-2">{poLine?.sku?.code || poLine?.sku?.name || "—"}</td><td>{line.planned_quantity}</td><td>{line.dispatched_quantity}</td><td>{line.delivered_quantity}</td><td>{Math.max(0, Number(line.dispatched_quantity || 0) - Number(line.delivered_quantity || 0) - Number(line.damaged_quantity || 0) - Number(line.rejected_quantity || 0))}</td></tr>; })}</tbody></table></div>
+              {(s.events || []).length > 0 && <div className="mt-5"><div className="text-sm font-semibold">Movement history</div><div className="mt-2 space-y-2">{[...s.events].sort((a: any, b: any) => Date.parse(a.event_at) - Date.parse(b.event_at)).map((event: any) => <div key={event.id} className="rounded-lg bg-white px-3 py-2 text-sm"><span className="font-medium">{event.status.replaceAll("_", " ")}</span><span className="ml-2 text-slate-500">{displayDate(event.event_at)}{event.location_name ? ` · ${event.location_name}` : ""}</span>{event.notes && <div className="text-slate-600">{event.notes}</div>}</div>)}</div></div>}
+              <div className="mt-5 flex flex-wrap items-center gap-4 text-sm"><span className="font-semibold">Files</span>{s.lr_document_version_id && <DocumentLink documentVersionId={s.lr_document_version_id} filename={s.lrFilename} label="View LR" />}{consignments.map((c: any) => <DocumentLink key={c.id} documentVersionId={c.document_version_id} filename={c.filename} label={`View consignment ${c.consignment_number || ""}`} />)}{pods.map((p: any) => <DocumentLink key={p.id} documentVersionId={p.document_version_id} filename={p.filename} label="View POD" />)}{!s.lr_document_version_id && !consignments.length && !pods.length && <span className="text-slate-500">No files attached</span>}</div>
+              <div className="mt-5 flex gap-4">{s.status === "PLANNED" && <button onClick={() => onAction(`/api/shipments/${s.id}/dispatch`)} className="text-sm font-semibold text-emerald-700">Dispatch <ArrowUpRight size={14} className="inline" /></button>}{["DISPATCHED", "IN_TRANSIT", "ARRIVED", "UNLOADING", "PARTIALLY_DELIVERED", "DELIVERY_ISSUE"].includes(s.status) && <button onClick={() => setPodSelection({ po: s.po, shipmentId: s.id })} className="text-sm font-semibold text-emerald-700">Confirm POD</button>}</div>
+            </div>}
+          </div>;
+        })}
       </Section>
       {createShipment && (
         <ShipmentPlanModal
@@ -1464,12 +1485,13 @@ function Shipments({ pos, onAction }: { pos: PO[]; onAction: Function }) {
           onAction={onAction}
         />
       )}{" "}
-      {podPo && (
+      {podSelection && (
         <DocumentWorkflowModal
           apiBase={API}
           mode="pod"
-          po={podPo}
-          onClose={() => setPodPo(null)}
+          po={podSelection.po}
+          shipmentId={podSelection.shipmentId}
+          onClose={() => setPodSelection(null)}
           onSaved={() => location.reload()}
         />
       )}
@@ -1515,7 +1537,7 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
               {isExpanded && (
                 <div className="border-t border-emerald-100 bg-emerald-50/30 px-8 py-5">
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {[['PO status', p.status?.replaceAll('_', ' ') || '—'], ['Source address', p.appointment?.sourceAddress || p.sourceAddress || 'Not extracted'], ['Destination address', p.appointment?.destinationAddress || p.destinationAddress || p.destination || 'Not extracted'], ['Warehouse', p.warehouse?.name || 'Mapping required'], ['Customer', p.customer || '—'], ['Platform', p.platform?.name || '—'], ['Appointment status', p.appointment?.status || 'Pending booking'], ['Appointment date', p.appointment?.appointmentAt ? new Date(p.appointment.appointmentAt).toLocaleString() : 'Not attached']].map(([label, value]) => (
+                    {[['PO status', p.status?.replaceAll('_', ' ') || '—'], ['Source address', p.appointment?.sourceAddress || p.sourceAddress || p.warehouse?.address_line1 || 'Not provided'], ['Destination address', p.appointment?.destinationAddress || p.destinationAddress || p.destination || 'Not provided'], ['Warehouse', p.warehouse?.name || 'Mapping required'], ['Customer', p.customer || '—'], ['Platform', p.platform?.name || '—'], ['Appointment status', p.appointment?.status || 'Pending booking'], ['Appointment date', p.appointment?.appointmentAt ? new Date(p.appointment.appointmentAt).toLocaleString() : 'Not attached']].map(([label, value]) => (
                       <div key={label} className="rounded-xl bg-white p-3">
                         <div className="text-xs text-slate-400">{label}</div>
                         <div className="mt-1 text-sm font-medium">{value}</div>
@@ -1523,9 +1545,14 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
                     ))}
                   </div>
                   <div className="mt-4 flex gap-4">
-                    {!p.appointment?.appointmentAt && <button onClick={() => setSelected(p)} className="text-sm font-semibold text-emerald-700">Attach appointment</button>}
-                    <button onClick={() => setConsignmentSelected(p)} className="text-sm font-semibold text-emerald-700">Attach consignment</button>
+                    <button onClick={() => setSelected(p)} className="text-sm font-semibold text-emerald-700">{p.appointment ? 'Replace appointment' : 'Attach appointment'}</button>
+                    {(p.shipments || []).length > 0 && <button onClick={() => setConsignmentSelected(p)} className="text-sm font-semibold text-emerald-700">Attach consignment</button>}
                   </div>
+                  {(p.appointment?.files?.length || p.appointmentHistory?.some((appointment: any) => appointment.files?.length) || p.consignments?.length) && <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+                    {(p.appointment?.files || []).map((file: any) => <DocumentLink key={file.documentVersionId} documentVersionId={file.documentVersionId} filename={file.filename} label={`Appointment: ${file.filename || 'View file'}`} />)}
+                    {(p.appointmentHistory || []).flatMap((appointment: any) => (appointment.files || []).map((file: any) => <DocumentLink key={`${appointment.id}-${file.documentVersionId}`} documentVersionId={file.documentVersionId} filename={file.filename} label={`Previous appointment: ${file.filename || 'View file'}`} />))}
+                    {(p.consignments || []).map((consignment: any) => <DocumentLink key={consignment.id} documentVersionId={consignment.document_version_id} filename={consignment.filename} label={`Consignment ${consignment.consignment_number}: ${consignment.filename || 'View file'}`} />)}
+                  </div>}
                 </div>
               )}
             </div>
@@ -1555,7 +1582,8 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
 }
 function Invoices({ pos, onAction }: { pos: PO[]; onAction: Function }) {
   const [selected, setSelected] = useState<PO | null>(null),
-    [shortClose, setShortClose] = useState<PO | null>(null);
+    [shortClose, setShortClose] = useState<PO | null>(null),
+    [expanded, setExpanded] = useState<string | null>(null);
   const queue = pos.filter(
     (p) =>
       [
@@ -1576,41 +1604,46 @@ function Invoices({ pos, onAction }: { pos: PO[]; onAction: Function }) {
           <span>PO</span>
           <span>Status</span>
           <span>Invoice</span>
-          <span>Action</span>
+          <span>Details</span>
         </div>
-        {queue.map((p) => (
-          <div
-            className="grid min-w-[620px] grid-cols-4 px-5 py-5 border-t border-slate-50 items-center"
-            key={p.id}
-          >
-            <span className="mono text-sm font-semibold">{p.externalId}</span>
-            <Badge tone={p.status === "DELIVERY_ISSUE" ? "amber" : "green"}>
-              {p.status.replaceAll("_", " ")}
-            </Badge>
-            <span className="text-sm">
-              {p.invoice?.invoice_number || "Not uploaded"}
-            </span>
-            <span>
-              {!p.invoice &&
-                ["FULLY_DELIVERED", "SHORT_CLOSED"].includes(p.status) && (
-                  <button
-                    onClick={() => setSelected(p)}
-                    className="text-xs font-semibold text-emerald-700"
-                  >
-                    Upload invoice <UploadCloud size={14} className="inline" />
-                  </button>
-                )}
-              {["DELIVERY_ISSUE", "PARTIALLY_DELIVERED"].includes(p.status) && (
-                <button
-                  onClick={() => setShortClose(p)}
-                  className="text-xs font-semibold text-amber-700"
-                >
-                  Short close
-                </button>
-              )}
-            </span>
-          </div>
-        ))}
+        {queue.map((p) => {
+          const isExpanded = expanded === p.id;
+          const lines = p.lines || [];
+          const ordered = lines.reduce((sum: number, line: any) => sum + Number(line.ordered || 0), 0);
+          const delivered = lines.reduce((sum: number, line: any) => sum + Number(line.delivered || 0), 0);
+          return <div key={p.id} className="border-t border-slate-100">
+            <button type="button" aria-expanded={isExpanded} aria-controls={`invoice-details-${p.id}`} onClick={() => setExpanded(isExpanded ? null : p.id)} className="grid w-full min-w-[620px] grid-cols-4 items-center px-5 py-5 text-left hover:bg-slate-50">
+              <span className="flex items-center gap-2 mono text-sm font-semibold">{isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}{p.externalId}</span>
+              <span><Badge tone={["DELIVERY_ISSUE", "PARTIALLY_DELIVERED"].includes(p.status) ? "amber" : "green"}>{p.status.replaceAll("_", " ")}</Badge></span>
+              <span className="text-sm">{p.invoice?.invoice_number || "Not uploaded"}</span>
+              <span className="text-xs font-semibold text-emerald-700">{isExpanded ? "Hide details" : "View details"}</span>
+            </button>
+            {isExpanded && <div id={`invoice-details-${p.id}`} className="min-w-[620px] border-t border-emerald-100 bg-emerald-50/30 px-5 py-5">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <DetailItem label="Customer" value={p.customer || "—"} />
+                <DetailItem label="Platform" value={p.platform?.name || "—"} />
+                <DetailItem label="Destination" value={p.destination || "—"} />
+                <DetailItem label="Warehouse" value={p.warehouse?.name || "—"} />
+                <DetailItem label="PO value" value={`INR ${Number(p.totalValue || 0).toLocaleString()}`} />
+                <DetailItem label="Delivery" value={`${delivered} of ${ordered} units`} />
+                <DetailItem label="Shipments" value={(p.shipments || []).length} />
+                <DetailItem label="PO status" value={p.status.replaceAll("_", " ")} />
+              </div>
+              <div className="mt-5 text-sm font-semibold">Invoice details</div>
+              {p.invoice ? <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <DetailItem label="Invoice number" value={p.invoice.invoice_number} />
+                <DetailItem label="Invoice date" value={p.invoice.invoice_date || "—"} />
+                <DetailItem label="Amount" value={`${p.invoice.currency || "INR"} ${Number(p.invoice.amount || 0).toLocaleString()}`} />
+                <DetailItem label="Uploaded" value={displayDate(p.invoice.uploaded_at)} />
+                <DetailItem label="Send status" value={p.invoice.send_status?.replaceAll("_", " ") || "—"} />
+                <DetailItem label="Sent" value={displayDate(p.invoice.sent_at)} />
+              </div> : <p className="mt-2 text-sm text-slate-500">No invoice has been uploaded for this PO.</p>}
+              <div className="mt-5 text-sm font-semibold">PO lines</div>
+              <div className="mt-2 overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="w-full min-w-[480px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">SKU</th><th>Ordered</th><th>Delivered</th><th>Remaining</th></tr></thead><tbody>{lines.map((line: any) => <tr key={line.id} className="border-t border-slate-100"><td className="px-3 py-2">{line.sku?.code || line.sku?.name || "—"}</td><td>{line.ordered}</td><td>{line.delivered || 0}</td><td>{Math.max(0, Number(line.ordered || 0) - Number(line.delivered || 0))}</td></tr>)}</tbody></table></div>
+              <div className="mt-5 flex flex-wrap items-center gap-4">{p.invoice && <DocumentLink documentVersionId={p.invoice.document_version_id} filename={p.invoice.filename} label="View invoice file" />}{!p.invoice && ["FULLY_DELIVERED", "SHORT_CLOSED"].includes(p.status) && <button onClick={() => setSelected(p)} className="text-sm font-semibold text-emerald-700">Upload invoice <UploadCloud size={14} className="inline" /></button>}{!p.invoice && ["DELIVERY_ISSUE", "PARTIALLY_DELIVERED"].includes(p.status) && <button onClick={() => setShortClose(p)} className="text-sm font-semibold text-amber-700">Short close</button>}</div>
+            </div>}
+          </div>;
+        })}
       </Section>
       {selected && (
         <DocumentWorkflowModal
@@ -1757,7 +1790,7 @@ function Details({
             </div>
           ))}
         </div>
-        {po.status === "UNDER_REVIEW" && (
+        {(po.status === "UNDER_REVIEW" || po.status === "APPOINTMENT_MATCHED_AWAITING_ACCEPTANCE") && (
           <div className="flex gap-3 mt-8">
             <button
               onClick={() => {

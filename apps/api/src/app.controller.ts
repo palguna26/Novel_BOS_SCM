@@ -33,6 +33,7 @@ export class AppController {
   @Post('inventory/add') add(@Req() req: any, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.addStock(req.user, body, key); }
   @Post('inventory/policies') policy(@Req() req: any, @Body() body: any) { return this.service.updateInventoryPolicy(req.user, body); }
   @Post('pos') createPo(@Req() req: any, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.createPo(req.user, body, key); }
+  @Post('pos/:id/update') updatePo(@Req() req: any, @Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.updatePo(req.user, id, body, key); }
   @Post('pos/:id/accept') accept(@Req() req: any, @Param('id') id: string, @Headers('idempotency-key') key?: string) { return this.service.acceptPo(req.user, id, key); }
   @Post('pos/:id/reject') reject(@Req() req: any, @Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.rejectPo(req.user, id, body.reason, key); }
   @Post('pos/:id/short-close') shortClose(@Req() req: any, @Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.shortClose(req.user, id, body, key); }

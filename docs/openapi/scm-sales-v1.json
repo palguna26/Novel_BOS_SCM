@@ -1,0 +1,49 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "SCM Sales Integration API",
+    "version": "1.0.0",
+    "description": "Read-only SCM v2 data for the Sales Module. Tenant scope is derived from the integration credential. Common list filters: limit (1-500), cursor, updatedAfter, active, status, stockStatus, channelId, siteId, locationId, itemId, purchaseOrderId, shipmentId, identifierType, value, from and to. Date filters use ISO 8601 timestamps; the end date is exclusive."
+  },
+  "servers": [{"url": "/api/v1/integration"}],
+  "components": {
+    "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
+    "parameters": {"id": {"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}},
+    "responses": {"NotFound": {"description": "Record not found", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}}},
+    "schemas": {
+      "Page": {"type": "object", "required": ["data", "page", "meta"], "properties": {"data": {"type": "array", "items": {}}, "page": {"type": "object", "properties": {"limit": {"type": "integer"}, "nextCursor": {"type": "string", "nullable": true}, "hasMore": {"type": "boolean"}}}, "meta": {"type": "object", "properties": {"requestId": {"type": "string", "format": "uuid"}, "asOf": {"type": "string", "format": "date-time"}}}}},
+      "Error": {"type": "object", "properties": {"error": {"type": "object", "properties": {"code": {"type": "string"}, "message": {"type": "string"}, "requestId": {"type": "string", "format": "uuid"}}}}}
+    }
+  },
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/health": {"get": {"summary": "Integration health", "responses": {"200": {"description": "Healthy"}}}},
+    "/products": {"get": {"summary": "Product master", "responses": {"200": {"description": "Products", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Page"}}}}}}},
+    "/products/{id}": {"get": {"summary": "Product by SCM UUID", "parameters": [{"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "Product"}, "404": {"$ref": "#/components/responses/NotFound"}}}},
+    "/product-identifiers": {"get": {"summary": "Marketplace identifiers and mappings", "responses": {"200": {"description": "Identifiers"}}}},
+    "/product-identifiers/resolve": {"get": {"summary": "Resolve a marketplace identifier", "responses": {"200": {"description": "Resolved product"}, "404": {"$ref": "#/components/responses/NotFound"}}}},
+    "/channels": {"get": {"summary": "Channels", "responses": {"200": {"description": "Channels"}}}},
+    "/sites": {"get": {"summary": "Sites and warehouses", "responses": {"200": {"description": "Sites"}}}},
+    "/locations": {"get": {"summary": "Warehouse and virtual locations", "responses": {"200": {"description": "Locations"}}}},
+    "/destinations": {"get": {"summary": "Marketplace and fulfilment destinations", "responses": {"200": {"description": "Destinations"}}}},
+    "/inventory": {"get": {"summary": "Inventory availability", "responses": {"200": {"description": "Inventory"}}}},
+    "/inventory/balances": {"get": {"summary": "Location and stock-state balances", "responses": {"200": {"description": "Balances"}}}},
+    "/purchase-orders": {"get": {"summary": "Purchase orders and lines", "responses": {"200": {"description": "Purchase orders"}}}},
+    "/purchase-orders/{id}": {"get": {"summary": "Purchase order by UUID", "parameters": [{"$ref": "#/components/parameters/id"}], "responses": {"200": {"description": "Purchase order"}}}},
+    "/purchase-order-lines": {"get": {"summary": "Authoritative PO line quantities", "responses": {"200": {"description": "PO line states"}}}},
+    "/po-gates": {"get": {"summary": "Acceptance and appointment gates", "responses": {"200": {"description": "Gate states"}}}},
+    "/reservations": {"get": {"summary": "Reservations and allocations", "responses": {"200": {"description": "Reservations"}}}},
+    "/appointments": {"get": {"summary": "Appointments and PO links", "responses": {"200": {"description": "Appointments"}}}},
+    "/shipments": {"get": {"summary": "Shipments and lines", "responses": {"200": {"description": "Shipments"}}}},
+    "/pods": {"get": {"summary": "PODs and delivery quantities", "responses": {"200": {"description": "PODs"}}}},
+    "/delivery-exceptions": {"get": {"summary": "Delivery exceptions", "responses": {"200": {"description": "Exceptions"}}}},
+    "/short-closures": {"get": {"summary": "Approved short closures", "responses": {"200": {"description": "Short closures"}}}},
+    "/invoices": {"get": {"summary": "PO invoices", "responses": {"200": {"description": "Invoices"}}}},
+    "/valuations": {"get": {"summary": "Authorized inventory valuation", "responses": {"200": {"description": "Valuation ledger"}, "403": {"description": "Finance scope required"}}}},
+    "/forecasts": {"get": {"summary": "SCM planning forecasts", "responses": {"200": {"description": "Forecasts"}, "403": {"description": "Planning scope required"}}}},
+    "/inbound-commitments": {"get": {"summary": "Inbound procurement commitments", "responses": {"200": {"description": "Inbound commitments"}, "403": {"description": "Planning scope required"}}}},
+    "/inventory-movements": {"get": {"summary": "Append-only inventory movements", "responses": {"200": {"description": "Movements"}}}},
+    "/ownership-transfers": {"get": {"summary": "Ownership transfer events", "responses": {"200": {"description": "Transfer events"}}}},
+    "/changes": {"get": {"summary": "Incremental change feed", "responses": {"200": {"description": "Changes"}}}}
+  }
+}

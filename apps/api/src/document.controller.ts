@@ -18,6 +18,13 @@ export class DocumentController {
     return { ...result, userId: req.user.id };
   }
 
+  @Post('upload')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_DOCUMENT_SIZE, fieldSize: MAX_DOCUMENT_SIZE } }))
+  async upload(@UploadedFile() file: Express.Multer.File, @Req() req: any, @Headers('idempotency-key') key?: string) {
+    if (!file) throw new BadRequestException('File is required.');
+    return this.docs.saveWithoutExtraction(file.originalname, file.buffer, req.user, key, file.mimetype);
+  }
+
   @Post('preview')
   @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_DOCUMENT_SIZE, fieldSize: MAX_DOCUMENT_SIZE } }))
   async preview(@UploadedFile() file: Express.Multer.File, @Body('extractedText') extractedText: string | undefined, @Req() req: any) {

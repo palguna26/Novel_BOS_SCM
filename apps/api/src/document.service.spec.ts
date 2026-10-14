@@ -3,10 +3,10 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { DocumentService } from './document.service';
 
 function service() {
-  const storage = { save: jest.fn(async () => 'stored/document'), read: jest.fn() };
+  const storage = { save: jest.fn(async (..._args: any[]) => 'stored/document'), read: jest.fn() };
   const supabase = { rpc: jest.fn() };
   const openRouter:any = { isConfigured: jest.fn(() => false), extract: jest.fn() };
-  return { storage, openRouter, subject: new DocumentService(storage as any, supabase as any, openRouter as any) };
+  return { storage, supabase, openRouter, subject: new DocumentService(storage as any, supabase as any, openRouter as any) };
 }
 
 describe('DocumentService uploads', () => {
@@ -28,6 +28,19 @@ describe('DocumentService uploads', () => {
     const result=await subject.saveAndExtract('po.csv',Buffer.from('a,b'),undefined,undefined,'text/csv','parsed source');
     expect(result.extracted.externalId).toBe('49990010116382');
     expect(result.extraction.method).toBe('openrouter');
+  });
+
+  it('removes PDF text NUL characters before extraction and database registration', async () => {
+    const { subject, supabase, openRouter } = service();
+    openRouter.isConfigured.mockReturnValue(true);
+    openRouter.extract.mockResolvedValue({document:{kind:'PURCHASE_ORDER',externalId:'4S2BJXYY',lines:[],warnings:[],confidence:0.8,text:'PO\u0000 text',destination:'Ben\u0000galuru'},metadata:{method:'openrouter',attempts:1,latencyMs:1}});
+    (supabase.rpc as any).mockResolvedValue({data:{duplicate:false},error:null});
+    await subject.saveAndExtract('po.csv',Buffer.from('a,b'),{companyId:'company',id:'actor'},undefined,'text/csv','PO\u0000 text');
+    expect(openRouter.extract.mock.calls[0][0].text).toBe('PO text');
+    const payload=(supabase.rpc.mock.calls[0] as any)[2].p_payload;
+    expect(payload.extracted.text).toBe('PO text');
+    expect(payload.extracted.destination).toBe('Bengaluru');
+    expect(JSON.stringify(payload)).not.toContain('\\u0000');
   });
 
   it('falls back to rules when OpenRouter fails', async () => {
@@ -61,5 +74,17 @@ describe('DocumentService uploads', () => {
     const result = await subject.saveAndExtract('po.xlsx', encrypted, undefined, undefined, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '');
     expect(result.confidence).toBe(0);
     expect(storage.save).toHaveBeenCalled();
+  });
+
+  it('registers a POD file without reading or extracting it', async () => {
+    const { subject, supabase, openRouter, storage } = service();
+    (supabase.rpc as any).mockResolvedValue({ data: { documentVersionId: 'version-1', duplicate: false }, error: null });
+    const result = await subject.saveWithoutExtraction('pod.csv', Buffer.from('evidence'), { companyId: 'company-1', id: 'user-1', canWrite: true }, 'upload-1', 'application/octet-stream');
+    expect(result.documentVersionId).toBe('version-1');
+    expect(openRouter.extract).not.toHaveBeenCalled();
+    expect(storage.save).toHaveBeenCalledWith('pod.csv', Buffer.from('evidence'), 'text/csv', 'company-1');
+    expect(supabase.rpc).toHaveBeenCalledWith('documents', 'register_extraction', expect.objectContaining({
+      p_payload: expect.objectContaining({ documentType: 'POD', extracted: { kind: 'POD', method: 'file_only' } }),
+    }));
   });
 });

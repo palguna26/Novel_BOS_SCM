@@ -12,11 +12,13 @@ delete from inventory.inventory_policies
  );
 
 delete from master_data.destination_mappings
- where destination_key <> 'BLR4'
-    or source_site_id <> '90cdb2b6-2bd2-4d8c-b7a8-f624de50a387'::uuid;
+ where company_id = (select company_id from master_data.sites where id = '90cdb2b6-2bd2-4d8c-b7a8-f624de50a387'::uuid)
+   and (destination_key <> 'BLR4'
+    or source_site_id <> '90cdb2b6-2bd2-4d8c-b7a8-f624de50a387'::uuid);
 
 delete from master_data.routes
- where not (
+ where company_id = (select company_id from master_data.sites where id = '90cdb2b6-2bd2-4d8c-b7a8-f624de50a387'::uuid)
+   and not (
    source_site_id = '90cdb2b6-2bd2-4d8c-b7a8-f624de50a387'::uuid
    and destination_key = 'BLR4'
  );
@@ -44,6 +46,7 @@ update master_data.locations
 update master_data.sites
    set active = false
  where site_type = 'WAREHOUSE'
+   and company_id = (select company_id from master_data.sites where id = '90cdb2b6-2bd2-4d8c-b7a8-f624de50a387'::uuid)
    and id <> '90cdb2b6-2bd2-4d8c-b7a8-f624de50a387'::uuid;
 
 commit;

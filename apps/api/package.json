@@ -14,13 +14,15 @@
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
+    "@nestjs/swagger": "^11.4.7",
     "@supabase/supabase-js": "^2.57.4",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "dotenv": "^16.4.7",
+    "multer": "^2.0.2",
     "nodemailer": "^7.0.3",
     "pdfjs-dist": "^5.4.149",
-    "multer": "^2.0.2"
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

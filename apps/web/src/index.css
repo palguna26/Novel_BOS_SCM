@@ -39,6 +39,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .mobile-only { display: none; }
 .mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
 
+/* Keep the long shipment planner inside the browser viewport. */
+.fixed.inset-0.z-40:has(> .max-w-3xl) {
+  align-items: flex-start;
+  overflow-y: auto;
+}
+.fixed.inset-0.z-40:has(> .max-w-3xl) > .max-w-3xl {
+  max-height: calc(100vh - 2rem);
+  margin-top: auto;
+  margin-bottom: auto;
+  overflow-y: auto;
+}
+
 ::selection { background: #c9e7dc; color: #14211f; }
 
 @media (max-width: 767px) {
