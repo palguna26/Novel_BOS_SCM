@@ -174,6 +174,45 @@ function StockDetail({ value }: any) {
   );
 }
 
+function InventoryHistory({ transactions }: { transactions: any[] }) {
+  return (
+    <div className="panel mt-5 overflow-hidden">
+      <div className="flex items-center justify-between border-b border-slate-100 p-5">
+        <div className="flex items-center gap-2">
+          <History size={18} className="text-emerald-700" />
+          <h3 className="font-semibold">Inventory History</h3>
+        </div>
+        <span className="text-xs text-slate-400">Latest {transactions.length}</span>
+      </div>
+      {transactions.length === 0 ? (
+        <div className="p-5 text-sm text-slate-500">No inventory transactions found.</div>
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {transactions.map((transaction: any) => (
+            <div key={transaction.id} className="grid gap-2 px-5 py-4 text-sm md:grid-cols-[1fr_1fr_1.5fr_1fr] md:items-center">
+              <div>
+                <div className="font-semibold">{transaction.transaction_type}</div>
+                <div className="text-xs text-slate-400">{new Date(transaction.created_at).toLocaleString()}</div>
+              </div>
+              <div className="text-slate-600">
+                {(transaction.entries || []).map((entry: any) => (
+                  <div key={entry.id}>{Number(entry.quantity_delta) > 0 ? "+" : ""}{entry.quantity_delta}</div>
+                ))}
+              </div>
+              <div className="text-slate-500">{transaction.reason || "No reason recorded"}</div>
+              <div className="md:text-right">
+                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${transaction.status === "REVERSED" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>
+                  {transaction.status}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function InventoryWorkspace({
   rows,
   masters,
@@ -619,6 +658,7 @@ export function InventoryWorkspace({
               );
             })}
           </List>
+          <InventoryHistory transactions={transactions} />
         </>
       )}
       {tab === "SKUs" && (

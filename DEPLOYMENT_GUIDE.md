@@ -37,6 +37,17 @@ The linked Supabase project already has the current migrations applied. Confirm 
 
 Make sure the Supabase Storage bucket named `scm-documents` exists. The migrations create it, but it is worth checking in Storage → Buckets.
 
+### Supabase API settings required
+
+This application uses custom Postgres schemas through the Supabase Data API. In Supabase, open **Project Settings -> API -> Exposed schemas** and add:
+
+```text
+iam, master_data, documents, workflow, scm, inventory, quality, planning,
+procurement, manufacturing, finance, platform, compat, integration
+```
+
+If these schemas are not exposed, login can work but workspace calls such as `/api/masters` will fail with HTTP 400.
+
 ## Recommended deployment method: Render Dashboard
 
 Deploy the API first, then the frontend. This avoids the frontend being built with an unknown API URL.
@@ -218,6 +229,16 @@ Check `VITE_API_URL` in the static site and redeploy the static site. Vite reads
 ### Browser reports a CORS error
 
 Set the API's `WEB_URL` to the exact frontend URL, with no trailing slash, then redeploy the API.
+
+### Login returns 401
+
+Check that the Render API has the current `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`. Also confirm the user exists in Supabase Auth, has an active row in `iam.users`, and has a `can_read = true` row in `iam.user_company_access`.
+
+The API intentionally returns 401 when the password is wrong or the user has no active company access.
+
+### `/api/masters` returns 400 after login
+
+Add all custom schemas listed in the Supabase API settings section to **Exposed schemas**, save the setting, then retry. Also confirm `SUPABASE_ANON_KEY` is the current key for this Supabase project.
 
 ### API deploy fails immediately
 
