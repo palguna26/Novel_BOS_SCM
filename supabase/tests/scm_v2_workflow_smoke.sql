@@ -50,6 +50,27 @@ values
 ('10000000-0000-0000-0000-000000000001','70000000-0000-0000-0000-000000000001',1,'30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000003','50000000-0000-0000-0000-000000000001','RELEASED','20000000-0000-0000-0000-000000000001',-100),
 ('10000000-0000-0000-0000-000000000001','70000000-0000-0000-0000-000000000001',2,'30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002','50000000-0000-0000-0000-000000000001','RELEASED','20000000-0000-0000-0000-000000000001',100);
 
+select inventory.adjust_stock(
+  '10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002',
+  '50000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001',3,'Cycle count correction up',
+  '00000000-0000-0000-0000-000000000001','ADJUST-UP-1');
+select inventory.adjust_stock(
+  '10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000002',
+  '50000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001',-3,'Cycle count correction down',
+  '00000000-0000-0000-0000-000000000001','ADJUST-DOWN-1');
+do $$ begin
+  if (select count(*) from inventory.stock_transactions where document_type = 'INVENTORY_ADJUSTMENT') <> 2 then
+    raise exception 'Manual stock changes did not create adjustment transactions';
+  end if;
+  if (select coalesce(sum(e.quantity_delta), 0)
+      from inventory.stock_ledger_entries e
+      join inventory.stock_transactions t on t.id = e.stock_transaction_id
+      where t.document_type = 'INVENTORY_ADJUSTMENT'
+        and e.location_id = '40000000-0000-0000-0000-000000000002') <> 0 then
+    raise exception 'Adjustment transactions did not net to zero at the stock location';
+  end if;
+end $$;
+
 insert into documents.files(id,company_id,document_type,business_key,current_version,created_by)
 values
 ('80000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','APPOINTMENT','AP-1',1,'00000000-0000-0000-0000-000000000001'),
@@ -60,6 +81,8 @@ values
 ('81000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','80000000-0000-0000-0000-000000000001',1,'appointment.pdf','private','appointment.pdf','application/pdf','hash-ap','00000000-0000-0000-0000-000000000001'),
 ('81000000-0000-0000-0000-000000000002','10000000-0000-0000-0000-000000000001','80000000-0000-0000-0000-000000000002',1,'pod.pdf','private','pod.pdf','application/pdf','hash-pod','00000000-0000-0000-0000-000000000001'),
 ('81000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000001','80000000-0000-0000-0000-000000000003',1,'invoice.pdf','private','invoice.pdf','application/pdf','hash-invoice','00000000-0000-0000-0000-000000000001');
+insert into documents.extraction_runs(id,company_id,document_version_id,engine,engine_version,status,overall_confidence,raw_output,started_at,completed_at)
+values ('82000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','81000000-0000-0000-0000-000000000001','TEST','1.0','COMPLETED',1.0,jsonb_build_object('linkedPoIds',jsonb_build_array('PO-ACCEPT-FIRST'),'text','PO-ACCEPT-FIRST BLR-FC'),statement_timestamp(),statement_timestamp());
 
 create temporary table smoke_ids(name text primary key, id uuid);
 insert into smoke_ids
@@ -73,14 +96,22 @@ select 'po1', (scm.create_purchase_order(
 
 select scm.record_acceptance((select id from smoke_ids where name='po1'),'ACCEPTED',null,'00000000-0000-0000-0000-000000000001','ACCEPT-1');
 do $$ begin
-  if exists (select 1 from inventory.reservations where purchase_order_id=(select id from smoke_ids where name='po1')) then
-    raise exception 'Reservation was created before appointment';
+  if (select count(*) from inventory.reservations where purchase_order_id=(select id from smoke_ids where name='po1')) <> 1 then
+    raise exception 'Acceptance did not create the reservation before appointment';
+  end if;
+  if not exists (
+    select 1 from platform.outbox_events
+    where aggregate_id=(select id from smoke_ids where name='po1')
+      and event_type='AUDIT_PO_ACCEPTED'
+      and published_at is null
+  ) then
+    raise exception 'Acceptance audit was not added to the durable outbox';
   end if;
 end $$;
 select scm.record_appointment((select id from smoke_ids where name='po1'),'AP-1',statement_timestamp()+interval '1 day','BLR FC','MATCHED','81000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','APPOINT-1');
 do $$ begin
   if (select count(*) from inventory.reservations where purchase_order_id=(select id from smoke_ids where name='po1')) <> 1 then
-    raise exception 'Exactly one reservation was not created after both gates';
+    raise exception 'Appointment attachment created a duplicate reservation';
   end if;
 end $$;
 
@@ -111,7 +142,7 @@ select 'po2', (scm.create_purchase_order(
 select scm.record_appointment((select id from smoke_ids where name='po2'),'AP-2',statement_timestamp()+interval '2 days','BLR FC','WAIVED',null,'00000000-0000-0000-0000-000000000001','APPOINT-2');
 do $$ begin
   if exists (select 1 from inventory.reservations where purchase_order_id=(select id from smoke_ids where name='po2')) then
-    raise exception 'Reservation was created before acceptance';
+    raise exception 'Appointment-first path created a reservation before acceptance';
   end if;
 end $$;
 select scm.record_acceptance((select id from smoke_ids where name='po2'),'ACCEPTED',null,'00000000-0000-0000-0000-000000000001','ACCEPT-2');

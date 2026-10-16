@@ -30,6 +30,7 @@ export type Page<T> = {
 };
 
 export const READ_SCOPES = [
+  'changes:read',
   'master:read',
   'inventory:read',
   'po:read',

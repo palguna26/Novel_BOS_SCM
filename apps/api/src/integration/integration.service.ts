@@ -360,8 +360,7 @@ export class IntegrationService {
   }
 
   async changes(context: IntegrationContext, query: IntegrationQuery) {
-    const hasRead = [...context.scopes].some(scope => scope.endsWith(':read'));
-    if (!hasRead) throw new ForbiddenException('A read scope is required');
+    this.scope(context, 'changes:read');
     const limit = this.limit(query.limit);
     const after = this.cursor(query.cursor);
     let request = this.supabase.schema('integration').from('change_log').select('*').eq('company_id', context.companyId).gt('sequence_id', after).order('sequence_id', { ascending: true }).limit(limit + 1);

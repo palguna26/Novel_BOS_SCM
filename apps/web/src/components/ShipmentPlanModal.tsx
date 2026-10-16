@@ -5,16 +5,17 @@ import { Card, CardContent, CardHeader } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 
-type Props = { pos: any[]; onClose: () => void; onAction: Function };
+type Props = { pos: any[]; onClose: () => void; onAction: Function; initialPoId?: string };
 type Vehicle = { truckNumber: string; driverName: string; driverPhone: string; plannedDispatchAt: string };
 
 const emptyVehicle = (): Vehicle => ({ truckNumber: '', driverName: '', driverPhone: '', plannedDispatchAt: '' });
 const remaining = (line: any) => Math.max(0, Number(line.availableToPlan ?? (Number(line.allocated || 0) - Number(line.planned || 0))));
 const draftKey = (poId: string) => `scm-shipment-draft:${poId}`;
 
-export function ShipmentPlanModal({ pos, onClose, onAction }: Props) {
-  const [step, setStep] = useState<1 | 2>(1);
-  const [po, setPo] = useState<any | null>(null);
+export function ShipmentPlanModal({ pos, onClose, onAction, initialPoId }: Props) {
+  const initialCandidate = initialPoId ? pos.find((item: any) => item.id === initialPoId) : null;
+  const [step, setStep] = useState<1 | 2>(initialPoId ? 2 : 1);
+  const [po, setPo] = useState<any | null>(initialCandidate);
   const [vehicle, setVehicle] = useState<Vehicle>(emptyVehicle);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -40,6 +41,12 @@ export function ShipmentPlanModal({ pos, onClose, onAction }: Props) {
     setQuantities(defaults);
   };
 
+  useEffect(() => {
+    if (!initialPoId) return;
+    const candidate = pos.find((item: any) => item.id === initialPoId);
+    if (candidate) selectPo(candidate);
+  }, [initialPoId]);
+
   const setQuantity = (lineId: string, value: string, maximum: number) => {
     if (value === '') return setQuantities(current => ({ ...current, [lineId]: '' }));
     const number = Number(value);
@@ -48,7 +55,7 @@ export function ShipmentPlanModal({ pos, onClose, onAction }: Props) {
   };
 
   const createShipment = async () => {
-    if (!po || !lines.length) return;
+    if (!po || !lines.length || !po.route) return;
     setBusy(true);
     try {
       if (await onAction(`/api/pos/${po.id}/shipments`, { ...vehicle, plannedDispatchAt: vehicle.plannedDispatchAt ? new Date(vehicle.plannedDispatchAt).toISOString() : null, lines })) {
@@ -66,13 +73,15 @@ export function ShipmentPlanModal({ pos, onClose, onAction }: Props) {
         <p className="mt-1 text-sm text-slate-500">{step === 1 ? 'Choose a PO with a matched appointment.' : 'Choose the quantities for this truck. Your edits are saved on this browser.'}</p>
       </div><button onClick={onClose} aria-label="Close"><XCircle /></button></div></CardHeader>
       <CardContent>{step === 1 ? <>
+        {eligiblePos.some((candidate: any) => !candidate.route) && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Some purchase orders are blocked because no active source-to-destination route is configured. Add the route in Inventory → UOMs & routes first.</div>}
         {eligiblePos.length === 0 ? <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center"><CalendarDays className="mx-auto text-slate-400" size={24} /><div className="mt-3 font-semibold">No purchase orders are ready</div><p className="mt-1 text-sm text-slate-500">Accept a PO, match its appointment, and reserve inventory first.</p></div> :
           <div className="overflow-x-auto rounded-xl border"><div className="grid min-w-[600px] grid-cols-[1.1fr_1fr_1fr_1fr] gap-3 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase text-slate-500"><span>PO</span><span>Appointment</span><span>Destination</span><span>Remaining</span></div>
             {eligiblePos.map((candidate: any) => <button key={candidate.id} onClick={() => selectPo(candidate)} className={`grid min-w-[600px] w-full grid-cols-[1.1fr_1fr_1fr_1fr] gap-3 border-t px-4 py-4 text-left text-sm ${po?.id === candidate.id ? 'bg-emerald-50' : 'hover:bg-slate-50'}`}><span className="mono font-semibold">{candidate.externalId}</span><span>{new Date(candidate.appointment.appointmentAt).toLocaleDateString()}</span><span>{candidate.destination || '—'}</span><span className="mono">{(candidate.lines || []).reduce((sum: number, line: any) => sum + remaining(line), 0)} units</span></button>)}
           </div>}
-        <Button disabled={!po} onClick={() => setStep(2)} className="mt-6 w-full bg-ink text-white">Continue to shipment planning</Button>
+        <Button disabled={!po || !po.route} onClick={() => setStep(2)} className="mt-6 w-full bg-ink text-white">Continue to shipment planning</Button>
       </> : <>
         <button onClick={() => setStep(1)} className="mb-4 text-sm font-semibold text-slate-500"><ChevronLeft size={15} className="mr-1 inline" />Change PO</button>
+        <div className="mb-4 rounded-xl bg-slate-50 p-4 text-sm"><div className="font-semibold">Route</div><div className="mt-1 text-slate-600">{po.route.destination_city || po.route.destination_key} · {po.route.transit_hours} hours · estimated ₹ {po.route.estimated_cost || 0}</div></div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Label>Truck number<Input className="mt-2" value={vehicle.truckNumber} onChange={e => setVehicle({ ...vehicle, truckNumber: e.target.value })} /></Label>
           <Label>Driver name<Input className="mt-2" value={vehicle.driverName} onChange={e => setVehicle({ ...vehicle, driverName: e.target.value })} /></Label>

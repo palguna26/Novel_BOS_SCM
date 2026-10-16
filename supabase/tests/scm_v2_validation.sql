@@ -13,7 +13,7 @@ declare
     'scm.appointments','inventory.stock_transactions','inventory.stock_ledger_entries',
     'inventory.reservations','inventory.reservation_lines','scm.shipments',
     'scm.shipment_lines','scm.pods','scm.pod_lines','scm.delivery_exceptions',
-    'scm.invoices','inventory.stock_balance_v','inventory.inventory_summary_v',
+    'scm.invoices','master_data.destination_facilities','inventory.stock_balance_v','inventory.inventory_summary_v',
     'scm.po_gate_state_v','compat.purchase_orders','compat.inventory_balances'
   ];
   v_required_functions text[] := array[
@@ -156,6 +156,26 @@ begin
     join inventory.stock_transactions t on t.id = e.stock_transaction_id
     where e.company_id <> t.company_id
   ) then raise exception 'Ledger entry company mismatch exists'; end if;
+
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'extraction_field_provenance'
+      and tgrelid = 'documents.extraction_runs'::regclass
+      and not tgisinternal
+  ) then raise exception 'Extraction field provenance trigger is missing'; end if;
+
+  if not exists (
+    select 1
+    from pg_trigger
+    where tgname = 'purchase_orders_destination_facility'
+      and tgrelid = 'scm.purchase_orders'::regclass
+      and not tgisinternal
+  ) then raise exception 'Purchase order destination facility trigger is missing'; end if;
+
+  if position('platform.outbox_events' in pg_get_functiondef('platform.write_audit(uuid,uuid,text,text,uuid,jsonb,jsonb,text,text)'::regprocedure)) = 0 then
+    raise exception 'Audit writes are not connected to the durable outbox';
+  end if;
 end;
 $$;
 

@@ -37,7 +37,9 @@ export class IntegrationGuard implements CanActivate {
       }
     }
 
-    // Keep local development compatible with the existing signed-in SCM session.
+    // Never turn an interactive SCM session into an integration client unless
+    // this is explicitly enabled for local development.
+    if (process.env.ALLOW_USER_INTEGRATION_FALLBACK !== 'true') throw new UnauthorizedException('Integration credentials are required');
     if (!token) throw new UnauthorizedException('Integration credentials are required');
     const user = await this.supabase.userFromToken(token);
     if (!user) throw new UnauthorizedException('Invalid integration credentials');

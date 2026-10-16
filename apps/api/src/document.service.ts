@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import * as path from 'node:path'; import * as crypto from 'node:crypto';
 import { normalizeDocument } from './document-extractor';
 import { SupabaseService } from './supabase.service';
@@ -34,7 +34,7 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
   extracted=this.stripNullBytes(await this.resolveSkuItems(extracted,user));
   return {filename:name,extracted,confidence:extracted.confidence,warnings:extracted.warnings,extraction};
  }
- async saveAndExtract(name:string,data:Buffer,user?:any,idempotencyKey?:string,mediaType='application/octet-stream',extractedText?:string){this.validateUpload(name,data,mediaType);mediaType=this.storageMediaType(name,mediaType);const file=await this.storage.save(name,data,mediaType,user?.companyId); let text=extractedText||'';
+ async saveAndExtract(name:string,data:Buffer,user?:any,idempotencyKey?:string,mediaType='application/octet-stream',extractedText?:string){this.validateUpload(name,data,mediaType);if(!user?.canWrite||!user?.companyId)throw new ForbiddenException('Write access is required.');mediaType=this.storageMediaType(name,mediaType);const file=await this.storage.save(name,data,mediaType,user.companyId); let text=extractedText||'';
   if(name.toLowerCase().endsWith('.pdf')){try{const pdfjs:any=await import('pdfjs-dist/legacy/build/pdf.mjs'); const pdf=await pdfjs.getDocument({data:new Uint8Array(data)}).promise; let parsedText=''; for(let i=1;i<=pdf.numPages;i++){const page=await pdf.getPage(i); const c=await page.getTextContent(); parsedText+=this.pageText(c.items||[])+'\n';} if(parsedText.trim())text=parsedText;}catch{ /* Keep browser text if server parsing fails. */ }}
   text=text.replace(/\u0000/g,'');
   const extractionStarted=Date.now(); let extracted; let extraction:ExtractionMetadata;
@@ -45,7 +45,7 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
   extracted = this.stripNullBytes(await this.resolveSkuItems(extracted, user));
   const sha256=this.hash(data);
   let registration:any=null;
-  if(user?.companyId){const {data:registered,error}=await this.supabase.rpc<any>('documents','register_extraction',{p_payload:{companyId:user.companyId,documentType:extracted.kind,businessKey:extracted.externalId||extracted.appointmentId,filename:name,storageBucket:this.storage.bucket,storagePath:file,mediaType,byteSize:data.length,sha256,confidence:extracted.confidence,extracted:{...extracted,_extraction:extraction}},p_actor_id:user.id,p_idempotency_key:idempotencyKey||crypto.randomUUID()});if(error){await this.storage.remove(file).catch(()=>undefined);throw new Error(error.message);}registration=registered;if(registered?.duplicate){await this.storage.remove(file).catch(()=>undefined);}}
+  {const {data:registered,error}=await this.supabase.rpc<any>('documents','register_extraction',{p_payload:{companyId:user.companyId,documentType:extracted.kind,businessKey:extracted.externalId||extracted.appointmentId,filename:name,storageBucket:this.storage.bucket,storagePath:file,mediaType,byteSize:data.length,sha256,confidence:extracted.confidence,extracted:{...extracted,_extraction:extraction}},p_actor_id:user.id,p_idempotency_key:idempotencyKey||crypto.randomUUID()});if(error){await this.storage.remove(file).catch(()=>undefined);throw new Error(error.message);}registration=registered;if(registered?.duplicate){await this.storage.remove(file).catch(()=>undefined);}}
   return {file,filename:name,sha256,extracted,confidence:extracted.confidence,warnings:extracted.warnings,extraction,...registration};
  }
 
@@ -61,7 +61,8 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
   return {documentVersionId:registration?.documentVersionId,filename:name,duplicate:registration?.duplicate||false};
  }
  async signedUrl(documentVersionId:string,user:any){
-  const {data,error}=await this.supabase.schema('documents').from('document_versions').select('id,filename,storage_bucket,storage_path').eq('id',documentVersionId).eq('company_id',user.companyId).maybeSingle();
+  const scoped=this.supabase.userClient(user);
+  const {data,error}=await scoped.schema('documents').from('document_versions').select('id,filename,storage_bucket,storage_path').eq('id',documentVersionId).eq('company_id',user.companyId).maybeSingle();
   if(error)throw new BadRequestException(error.message);
   if(!data)throw new NotFoundException('Document not found');
   const {data:url,error:urlError}=await this.supabase.client.storage.from(data.storage_bucket).createSignedUrl(data.storage_path,600);
@@ -73,10 +74,11 @@ export interface DocumentStorage { bucket:string; save(name:string,data:Buffer,m
  private async resolveSkuItems(extracted:any, user?:any){
   if(!user?.companyId || !extracted.lines?.length) return extracted;
   try {
+   const scoped=this.supabase.userClient(user);
    const [itemsResult, identifiersResult, channelsResult] = await Promise.all([
-    this.supabase.schema('master_data').from('items').select('id,code,name').eq('company_id', user.companyId),
-    this.supabase.schema('master_data').from('item_identifiers').select('item_id,value,identifier_type,channel_id').eq('company_id', user.companyId).eq('active', true),
-    this.supabase.schema('master_data').from('channels').select('id,code').eq('company_id', user.companyId),
+    scoped.schema('master_data').from('items').select('id,code,name').eq('company_id', user.companyId),
+    scoped.schema('master_data').from('item_identifiers').select('item_id,value,identifier_type,channel_id').eq('company_id', user.companyId).eq('active', true),
+    scoped.schema('master_data').from('channels').select('id,code').eq('company_id', user.companyId),
    ]);
    const items = itemsResult.data || [];
    const identifiers = identifiersResult.data || [];

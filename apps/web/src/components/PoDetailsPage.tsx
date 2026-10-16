@@ -1,7 +1,748 @@
-import {AlertTriangle,ArrowLeft,CalendarDays,CheckCircle2,Clock3,FileText,History,MapPin,ReceiptText,Truck,XCircle} from 'lucide-react';
-import {Button} from './ui/button'; import {Card,CardContent,CardHeader} from './ui/card'; import {Alert} from './ui/alert'; import {Progress} from './ui/progress'; import {Tabs} from './ui/tabs';
-import {DocumentLink} from './DocumentLink';
-type Props={po:any;onClose:()=>void;onAction:Function;onEdit:()=>void;canEdit:boolean};
-function Badge({children,tone='blue'}:{children:any;tone?:string}){const colors:any={green:'bg-emerald-100 text-emerald-700',amber:'bg-amber-100 text-amber-700',red:'bg-red-100 text-red-700',blue:'bg-blue-100 text-blue-700'};return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${colors[tone]}`}>{children}</span>}
-const Field=({label,value}:{label:string;value:any})=><div className="rounded-xl bg-slate-50 p-4"><div className="text-xs text-slate-400">{label}</div><div className="mt-2 text-sm font-medium">{value||'—'}</div></div>;
-export function PoDetailsPage({po,onClose,onAction,onEdit,canEdit}:Props){const lines=po.lines||[],shipments=po.shipments||[],ordered=lines.reduce((n:number,l:any)=>n+Number(l.ordered||0),0),delivered=lines.reduce((n:number,l:any)=>n+Number(l.delivered||0),0),pct=ordered?Math.round(delivered/ordered*100):0;const tabs=['Overview','Lines & Inventory','Appointment','Shipments','POD & Discrepancies','Invoice','Audit Activity'];return <div className="fixed inset-0 z-20 overflow-auto bg-surface"><div className="mx-auto max-w-[1500px] p-8 lg:p-10"><div className="flex items-start justify-between"><div><button onClick={onClose} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700"><ArrowLeft size={16}/>Back to PO Inbox</button><div className="flex items-center gap-3"><span className="mono text-sm text-slate-400">{po.platform?.name}</span><Badge tone={po.status==='FULLY_DELIVERED'?'green':po.status.includes('SHORT')?'amber':'blue'}>{po.status.replaceAll('_',' ')}</Badge></div><h1 className="mt-2 text-3xl font-semibold">{po.externalId}</h1><p className="mt-2 text-sm text-slate-500">{po.customer||'Customer not supplied'} · {po.destination}</p></div><div className="flex gap-3">{canEdit&&!shipments.some((shipment:any)=>!['PLANNED','VEHICLE_ASSIGNED','LOADING','CANCELLED'].includes(shipment.status))&&!['REJECTED','CANCELLED','CLOSED','INVOICE_UPLOADED'].includes(po.status)&&<Button onClick={onEdit} className="bg-emerald-600 text-white">Edit PO</Button>}{shipments.some((shipment:any)=>!['PLANNED','VEHICLE_ASSIGNED','LOADING','CANCELLED'].includes(shipment.status))&&<span className="self-center text-xs text-slate-500">PO editing locks after dispatch</span>}{po.status==='UNDER_REVIEW'&&<Button onClick={()=>{onAction(`/api/pos/${po.id}/accept`);onClose()}} className="bg-ink text-white">Accept PO</Button>}<button onClick={onClose}><XCircle/></button></div></div><div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5"><Field label="Warehouse" value={po.warehouse?.name||'Mapping required'}/><Field label="PO value" value={`₹ ${Number(po.totalValue||0).toLocaleString()}`}/><Card><CardContent><div className="text-xs text-slate-400">Fulfilment</div><div className="mt-2 font-semibold">{delivered} / {ordered} units</div><div className="mt-3"><Progress value={pct}/></div><div className="mt-1 text-xs text-slate-400">{pct}% confirmed</div></CardContent></Card><Field label="Appointment" value={po.appointment?.appointment_id||po.appointment?.appointmentId||'Pending booking'}/><Field label="Deadline" value={po.deadline?new Date(po.deadline).toLocaleDateString():'Not set'}/></div><div className="mt-8"><Tabs items={tabs}>{active=>{if(active==='Overview')return <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]"><Card><CardHeader><h2 className="font-semibold">Operational overview</h2><p className="mt-1 text-sm text-slate-400">The complete record for moving this PO forward.</p></CardHeader><CardContent><div className="grid gap-4 sm:grid-cols-2"><Field label="Source document" value={po.document?.id?<DocumentLink documentVersionId={po.document.id} filename={po.document.filename}/>: 'No PO file attached'}/><Field label="Created" value={po.createdAt?new Date(po.createdAt).toLocaleString():'—'}/><Field label="Accepted" value={po.acceptedAt?new Date(po.acceptedAt).toLocaleString():'Awaiting acceptance'}/><Field label="Inventory state" value={po.shortage?`${po.shortage} units short`:'Reservation available'}/></div></CardContent></Card><Card><CardHeader><h2 className="font-semibold">Next steps</h2></CardHeader><CardContent><div className="space-y-4">{[['PO review',po.status!=='UNDER_REVIEW'],['Appointment letter',!!po.appointment],['Shipment plan',shipments.length>0],['Delivery confirmation',delivered>0],['Invoice',!!po.invoice]].map(([label,done])=><div className="flex items-center gap-3 text-sm" key={label as string}>{done?<CheckCircle2 className="text-emerald-600" size={18}/>:<Clock3 className="text-amber-500" size={18}/>}<span>{label}</span></div>)}</div></CardContent></Card></div>;if(active==='Lines & Inventory')return <Card><CardHeader><h2 className="font-semibold">Line reconciliation and inventory protection</h2><p className="mt-1 text-sm text-slate-400">Reserved, dispatched, delivered, and unresolved quantities by SKU.</p></CardHeader><CardContent><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-xs uppercase tracking-wide text-slate-400"><th className="pb-3">SKU</th><th>Ordered</th><th>Allocated</th><th>Blocked</th><th>Dispatched</th><th>Delivered</th><th>Remaining</th></tr></thead><tbody>{lines.map((l:any)=><tr className="border-b last:border-0" key={l.id}><td className="py-4"><div className="mono font-semibold">{l.sku?.code||l.sku_id}</div><div className="text-xs text-slate-400">{l.sku?.name}</div></td><td>{l.ordered}</td><td>{l.allocated}</td><td>{Math.max(0,(l.allocated||0)-(l.delivered||0))}</td><td>{l.dispatched||0}</td><td>{l.delivered||0}</td><td className="font-semibold">{Math.max(0,(l.ordered||0)-(l.delivered||0))}</td></tr>)}</tbody></table></div></CardContent></Card>;if(active==='Appointment')return <Card><CardHeader><h2 className="font-semibold">Appointment record</h2></CardHeader><CardContent>{po.appointment?<div className="grid gap-4 sm:grid-cols-3"><Field label="Appointment ID" value={po.appointment.appointment_id||po.appointment.appointmentId}/><Field label="Status" value={po.appointment.status}/><Field label="Location" value={po.appointment.location}/><Field label="Booking time" value={po.appointment.booking_date}/><Field label="Appointment time" value={po.appointment.appointment_at||po.appointment.appointmentAt}/><Field label="Documents" value={po.appointment.files?.length?<div className="space-y-2">{po.appointment.files.map((file:any)=><DocumentLink key={file.documentVersionId} documentVersionId={file.documentVersionId} filename={file.filename}/>)}</div>:'No file attached'}/></div>:<Alert><AlertTriangle className="mr-2 inline" size={16}/>This PO has no appointment letter yet.</Alert>}{po.appointmentHistory?.some((appointment:any)=>appointment.files?.length>0)&&<div className="mt-5 border-t pt-4"><div className="mb-2 text-sm font-semibold">Previous appointment files</div><div className="space-y-2">{po.appointmentHistory.filter((appointment:any)=>appointment.files?.length>0).flatMap((appointment:any)=>appointment.files.map((file:any)=><div key={`${appointment.id}-${file.documentVersionId}`}><DocumentLink documentVersionId={file.documentVersionId} filename={file.filename}/></div>))}</div></div>}</CardContent></Card>;if(active==='Shipments')return <div className="grid gap-5 lg:grid-cols-2">{shipments.length?shipments.map((s:any)=><Card key={s.id}><CardHeader><div className="flex justify-between"><div><div className="mono font-semibold">{s.number}</div><div className="mt-1 text-sm text-slate-500">{s.truckNumber||s.truck_number||'Truck not assigned'} · {s.driverName||s.driver_name||'Driver not assigned'}</div></div><Badge tone={s.status==='DELIVERED'?'green':'amber'}>{s.status.replaceAll('_',' ')}</Badge></div></CardHeader><CardContent><div className="grid grid-cols-2 gap-4 text-sm"><Field label="Planned dispatch" value={s.planned_dispatch||s.plannedDispatch}/><Field label="Expected arrival" value={s.expected_arrival||s.expectedArrival}/><Field label="Actual cost" value={`₹ ${s.actual_cost||s.actualCost||'—'}`}/><Field label="POD" value={s.status==='DELIVERED'?'Confirmed':'Awaiting POD'}/></div><div className="mt-4 space-y-2">{s.lr_document_version_id&&<div><span className="mr-2 text-xs text-slate-500">LR:</span><DocumentLink documentVersionId={s.lr_document_version_id} filename={s.lrFilename}/></div>}{(po.consignments||[]).filter((c:any)=>c.shipment_id===s.id).map((c:any)=><div key={c.id}><span className="mr-2 text-xs text-slate-500">Consignment:</span><DocumentLink documentVersionId={c.document_version_id} filename={c.filename}/></div>)}{(po.pods||[]).filter((p:any)=>p.shipmentIds?.includes(s.id)).map((p:any)=><div key={p.id}><span className="mr-2 text-xs text-slate-500">POD:</span><DocumentLink documentVersionId={p.document_version_id} filename={p.filename}/></div>)}</div></CardContent></Card>):<Alert><Truck className="mr-2 inline" size={16}/>Shipment planning has not started.</Alert>}</div>;if(active==='POD & Discrepancies')return <Card><CardHeader><h2 className="font-semibold">POD and delivery discrepancies</h2></CardHeader><CardContent>{po.pods?.length?<div className="space-y-3">{po.pods.map((p:any)=><div className="rounded-xl bg-slate-50 p-4" key={p.id}><DocumentLink documentVersionId={p.document_version_id} filename={p.filename}/><div className="mt-1 text-sm text-slate-500">Uploaded {p.confirmed_at||p.confirmedAt||'—'}</div></div>)}</div>:<Alert><FileText className="mr-2 inline" size={16}/>No POD has been confirmed for this PO.</Alert>}</CardContent></Card>;if(active==='Invoice')return <Card><CardHeader><h2 className="font-semibold">Invoice gate</h2></CardHeader><CardContent>{po.invoice?<div className="grid gap-4 sm:grid-cols-3"><Field label="Invoice number" value={po.invoice.number}/><Field label="Amount" value={`₹ ${po.invoice.amount}`}/><Field label="File" value={<DocumentLink documentVersionId={po.invoice.document_version_id} filename={po.invoice.filename}/>}/></div>:<Alert><ReceiptText className="mr-2 inline" size={16}/>Invoice upload is available only after full delivery or approved short close.</Alert>}</CardContent></Card>;return <Card><CardHeader><h2 className="font-semibold">Immutable audit activity</h2></CardHeader><CardContent><div className="flex items-center gap-3 text-sm text-slate-500"><History size={18}/>Audit events are available in the Audit Log screen.</div></CardContent></Card>}}</Tabs></div></div></div>}
+import {
+  AlertTriangle,
+  ArrowLeft,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  FileText,
+  History,
+  MapPin,
+  ReceiptText,
+  Truck,
+  XCircle,
+} from "lucide-react";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardHeader } from "./ui/card";
+import { Alert } from "./ui/alert";
+import { Progress } from "./ui/progress";
+import { Tabs } from "./ui/tabs";
+import { DocumentLink } from "./DocumentLink";
+type Props = {
+  po: any;
+  onClose: () => void;
+  onAction: Function;
+  onEdit: () => void;
+  canEdit: boolean;
+  canApprove?: boolean;
+  onAttachAppointment?: () => void;
+  onPlanShipment?: () => void;
+  onUploadInvoice?: () => void;
+  onConfirmPod?: (shipmentId: string) => void;
+};
+function Badge({ children, tone = "blue" }: { children: any; tone?: string }) {
+  const colors: any = {
+    green: "bg-emerald-100 text-emerald-700",
+    amber: "bg-amber-100 text-amber-700",
+    red: "bg-red-100 text-red-700",
+    blue: "bg-blue-100 text-blue-700",
+  };
+  return (
+    <span
+      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${colors[tone]}`}
+    >
+      {children}
+    </span>
+  );
+}
+const Field = ({ label, value }: { label: string; value: any }) => (
+  <div className="rounded-xl bg-slate-50 p-4">
+    <div className="text-xs text-slate-400">{label}</div>
+    <div className="mt-2 text-sm font-medium">{value || "—"}</div>
+  </div>
+);
+export function PoDetailsPage({
+  po,
+  onClose,
+  onAction,
+  onEdit,
+  canEdit,
+  canApprove = false,
+  onAttachAppointment,
+  onPlanShipment,
+  onUploadInvoice,
+  onConfirmPod,
+}: Props) {
+  const lines = po.lines || [],
+    shipments = po.shipments || [],
+    ordered = lines.reduce(
+      (n: number, l: any) => n + Number(l.ordered || 0),
+      0,
+    ),
+    delivered = lines.reduce(
+      (n: number, l: any) => n + Number(l.delivered || 0),
+      0,
+    ),
+    pct = ordered ? Math.round((delivered / ordered) * 100) : 0;
+  const tabs = [
+    "Overview",
+    "Lines & Inventory",
+    "Appointment",
+    "Shipments",
+    "POD & Discrepancies",
+    "Invoice",
+    "Audit Activity",
+  ];
+  return (
+    <div className="fixed inset-0 z-20 overflow-auto bg-surface">
+      <div className="mx-auto max-w-[1500px] p-8 lg:p-10">
+        <div className="flex items-start justify-between">
+          <div>
+            <button
+              onClick={onClose}
+              className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700"
+            >
+              <ArrowLeft size={16} />
+              Back to PO Inbox
+            </button>
+            <div className="flex items-center gap-3">
+              <span className="mono text-sm text-slate-400">
+                {po.platform?.name}
+              </span>
+              <Badge
+                tone={
+                  po.status === "FULLY_DELIVERED"
+                    ? "green"
+                    : po.status.includes("SHORT")
+                      ? "amber"
+                      : "blue"
+                }
+              >
+                {po.status.replaceAll("_", " ")}
+              </Badge>
+            </div>
+            <h1 className="mt-2 text-3xl font-semibold">{po.externalId}</h1>
+            <p className="mt-2 text-sm text-slate-500">
+              {po.customer || "Customer not supplied"} · {po.destination}
+            </p>
+          </div>
+          <div className="flex gap-3">
+            {canEdit &&
+              !shipments.some(
+                (shipment: any) =>
+                  ![
+                    "PLANNED",
+                    "VEHICLE_ASSIGNED",
+                    "LOADING",
+                    "CANCELLED",
+                  ].includes(shipment.status),
+              ) &&
+              !["REJECTED", "CANCELLED", "CLOSED", "INVOICE_UPLOADED"].includes(
+                po.status,
+              ) && (
+                <Button onClick={onEdit} className="bg-emerald-600 text-white">
+                  Edit PO
+                </Button>
+              )}
+            {shipments.some(
+              (shipment: any) =>
+                ![
+                  "PLANNED",
+                  "VEHICLE_ASSIGNED",
+                  "LOADING",
+                  "CANCELLED",
+                ].includes(shipment.status),
+            ) && (
+              <span className="self-center text-xs text-slate-500">
+                PO editing locks after dispatch
+              </span>
+            )}
+            {canApprove && po.status === "UNDER_REVIEW" && (
+              <Button
+                onClick={() => {
+                  onAction(`/api/pos/${po.id}/accept`);
+                  onClose();
+                }}
+                className="bg-ink text-white"
+              >
+                Accept PO
+              </Button>
+            )}
+            <button onClick={onClose}>
+              <XCircle />
+            </button>
+          </div>
+        </div>
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <Field
+            label="Warehouse"
+            value={po.warehouse?.name || "Mapping required"}
+          />
+          <Field
+            label="PO value"
+            value={`₹ ${Number(po.totalValue || 0).toLocaleString()}`}
+          />
+          <Card>
+            <CardContent>
+              <div className="text-xs text-slate-400">Fulfilment</div>
+              <div className="mt-2 font-semibold">
+                {delivered} / {ordered} units
+              </div>
+              <div className="mt-3">
+                <Progress value={pct} />
+              </div>
+              <div className="mt-1 text-xs text-slate-400">
+                {pct}% confirmed
+              </div>
+            </CardContent>
+          </Card>
+          <Field
+            label="Appointment"
+            value={
+              po.appointment?.appointment_id ||
+              po.appointment?.appointmentId ||
+              "Pending booking"
+            }
+          />
+          <Field
+            label="Deadline"
+            value={
+              po.deadline
+                ? new Date(po.deadline).toLocaleDateString()
+                : "Not set"
+            }
+          />
+        </div>
+        <div className="mt-8">
+          <Tabs items={tabs}>
+            {(active) => {
+              if (active === "Overview")
+                return (
+                  <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+                    <Card>
+                      <CardHeader>
+                        <h2 className="font-semibold">Operational overview</h2>
+                        <p className="mt-1 text-sm text-slate-400">
+                          The complete record for moving this PO forward.
+                        </p>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field
+                            label="Source document"
+                            value={
+                              po.document?.id ? (
+                                <DocumentLink
+                                  documentVersionId={po.document.id}
+                                  filename={po.document.filename}
+                                />
+                              ) : (
+                                "No PO file attached"
+                              )
+                            }
+                          />
+                          <Field
+                            label="Created"
+                            value={
+                              po.createdAt
+                                ? new Date(po.createdAt).toLocaleString()
+                                : "—"
+                            }
+                          />
+                          <Field
+                            label="PO source address"
+                            value={po.sourceAddress || po.warehouse?.address_line1 || "Not supplied"}
+                          />
+                          <Field
+                            label="PO destination address"
+                            value={po.destinationAddress || po.destination || "Not supplied"}
+                          />
+                          <Field
+                            label="Destination facility"
+                            value={po.destinationFacility?.name || po.destination || "Not resolved"}
+                          />
+                          <Field
+                            label="Appointment source address"
+                            value={po.appointment?.sourceAddress || "Not attached / not extracted"}
+                          />
+                          <Field
+                            label="Appointment destination address"
+                            value={po.appointment?.destinationAddress || "Not attached / not extracted"}
+                          />
+                          <Field
+                            label="Accepted"
+                            value={
+                              po.acceptedAt
+                                ? new Date(po.acceptedAt).toLocaleString()
+                                : "Awaiting acceptance"
+                            }
+                          />
+                          <Field
+                            label="Inventory state"
+                            value={
+                              po.shortage
+                                ? `${po.shortage} units short`
+                                : po.status === "UNDER_REVIEW"
+                                  ? "Not reserved — awaiting acceptance"
+                                  : "Reserved / no shortage reported"
+                            }
+                          />
+                          <Field
+                            label="Extraction review"
+                            value={
+                              po.extraction?.status === "FAILED"
+                                ? "Extraction failed"
+                                : po.extraction?.status === "REVIEW_REQUIRED"
+                                  ? "Review required"
+                                  : po.extraction?.status || "Not available"
+                            }
+                          />
+                          <Field
+                            label="Transit route"
+                            value={
+                              po.route
+                                ? `${po.route.destination_key || po.route.destination_city || "Destination"}`
+                                : "Route not configured"
+                            }
+                          />
+                          <Field
+                            label="Transit time"
+                            value={
+                              po.route?.transit_hours != null
+                                ? `${po.route.transit_hours} hours`
+                                : "Not set"
+                            }
+                          />
+                        </div>
+                      </CardContent>
+                    </Card>
+                    <Card>
+                      <CardHeader>
+                        <h2 className="font-semibold">Next steps</h2>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          {[
+                            ["PO review", po.status !== "UNDER_REVIEW"],
+                            ["Appointment letter", !!po.appointment],
+                            ["Shipment plan", shipments.length > 0],
+                            ["Delivery confirmation", delivered > 0],
+                            ["Invoice", !!po.invoice],
+                          ].map(([label, done]) => (
+                            <div
+                              className="flex items-center gap-3 text-sm"
+                              key={label as string}
+                            >
+                              {done ? (
+                                <CheckCircle2
+                                  className="text-emerald-600"
+                                  size={18}
+                                />
+                              ) : (
+                                <Clock3 className="text-amber-500" size={18} />
+                              )}
+                              <span>{label}</span>
+                            </div>
+                          ))}
+                          <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                            <p>
+                            {po.extraction?.status === "FAILED" || po.extraction?.status === "REVIEW_REQUIRED"
+                              ? "Next action: review or correct the extracted PO fields before continuing."
+                              : po.status === "UNDER_REVIEW"
+                                ? "Next action: review the extracted PO and accept it to block stock."
+                              : !po.appointment
+                                ? "Next action: attach the appointment letter. Stock is already blocked after acceptance."
+                                : shipments.length === 0
+                                  ? "Next action: plan one or more shipments using the configured route."
+                                  : delivered < ordered
+                                    ? "Next action: update delivery and confirm the POD."
+                                    : !po.invoice
+                                      ? "Next action: upload the vendor invoice."
+                                      : "Workflow complete."}
+                            </p>
+                            {canEdit && (po.extraction?.status === "FAILED" || po.extraction?.status === "REVIEW_REQUIRED") && (
+                              <button onClick={onEdit} className="mt-2 font-semibold text-emerald-800 underline">
+                                Review extracted fields
+                              </button>
+                            )}
+                            {!po.appointment && onAttachAppointment && po.status !== "UNDER_REVIEW" && (
+                              <button onClick={onAttachAppointment} className="mt-2 font-semibold text-emerald-800 underline">
+                                Attach appointment letter
+                              </button>
+                            )}
+                            {po.appointment && shipments.length === 0 && onPlanShipment && (
+                              <button onClick={onPlanShipment} className="mt-2 ml-4 font-semibold text-emerald-800 underline">
+                                Plan shipment
+                              </button>
+                            )}
+                            {!po.invoice &&
+                              ["FULLY_DELIVERED", "SHORT_CLOSED"].includes(po.status) &&
+                              onUploadInvoice && (
+                                <button onClick={onUploadInvoice} className="mt-2 ml-4 font-semibold text-emerald-800 underline">
+                                  Upload vendor invoice
+                                </button>
+                              )}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+                );
+              if (active === "Lines & Inventory")
+                return (
+                  <Card>
+                    <CardHeader>
+                      <h2 className="font-semibold">
+                        Line reconciliation and inventory protection
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-400">
+                        Reserved, dispatched, delivered, and unresolved
+                        quantities by SKU.
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead>
+                            <tr className="border-b text-xs uppercase tracking-wide text-slate-400">
+                              <th className="pb-3">SKU</th>
+                              <th>Ordered</th>
+                              <th>Allocated</th>
+                              <th>Blocked</th>
+                              <th>Dispatched</th>
+                              <th>Delivered</th>
+                              <th>Remaining</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {lines.map((l: any) => (
+                              <tr className="border-b last:border-0" key={l.id}>
+                                <td className="py-4">
+                                  <div className="mono font-semibold">
+                                    {l.sku?.code || l.sku_id}
+                                  </div>
+                                  <div className="text-xs text-slate-400">
+                                    {l.sku?.name}
+                                  </div>
+                                </td>
+                                <td>{l.ordered}</td>
+                                <td>{l.allocated}</td>
+                                <td>
+                                  {Math.max(
+                                    0,
+                                    (l.allocated || 0) - (l.delivered || 0),
+                                  )}
+                                </td>
+                                <td>{l.dispatched || 0}</td>
+                                <td>{l.delivered || 0}</td>
+                                <td className="font-semibold">
+                                  {Math.max(
+                                    0,
+                                    (l.ordered || 0) - (l.delivered || 0),
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              if (active === "Appointment")
+                return (
+                  <Card>
+                    <CardHeader>
+                      <h2 className="font-semibold">Appointment record</h2>
+                    </CardHeader>
+                    <CardContent>
+                      {po.appointment ? (
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          <Field
+                            label="Appointment ID"
+                            value={
+                              po.appointment.appointment_id ||
+                              po.appointment.appointmentId
+                            }
+                          />
+                          <Field label="Status" value={po.appointment.status} />
+                          <Field
+                            label="Location"
+                            value={po.appointment.location}
+                          />
+                          <Field
+                            label="Booking time"
+                            value={po.appointment.booking_date}
+                          />
+                          <Field
+                            label="Appointment time"
+                            value={
+                              po.appointment.appointment_at ||
+                              po.appointment.appointmentAt
+                            }
+                          />
+                          <Field
+                            label="Documents"
+                            value={
+                              po.appointment.files?.length ? (
+                                <div className="space-y-2">
+                                  {po.appointment.files.map((file: any) => (
+                                    <DocumentLink
+                                      key={file.documentVersionId}
+                                      documentVersionId={file.documentVersionId}
+                                      filename={file.filename}
+                                    />
+                                  ))}
+                                </div>
+                              ) : (
+                                "No file attached"
+                              )
+                            }
+                          />
+                        </div>
+                      ) : (
+                        <Alert>
+                          <AlertTriangle className="mr-2 inline" size={16} />
+                          This PO has no appointment letter yet.
+                        </Alert>
+                      )}
+                      {po.appointmentHistory?.some(
+                        (appointment: any) => appointment.files?.length > 0,
+                      ) && (
+                        <div className="mt-5 border-t pt-4">
+                          <div className="mb-2 text-sm font-semibold">
+                            Previous appointment files
+                          </div>
+                          <div className="space-y-2">
+                            {po.appointmentHistory
+                              .filter(
+                                (appointment: any) =>
+                                  appointment.files?.length > 0,
+                              )
+                              .flatMap((appointment: any) =>
+                                appointment.files.map((file: any) => (
+                                  <div
+                                    key={`${appointment.id}-${file.documentVersionId}`}
+                                  >
+                                    <DocumentLink
+                                      documentVersionId={file.documentVersionId}
+                                      filename={file.filename}
+                                    />
+                                  </div>
+                                )),
+                              )}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              if (active === "Shipments")
+                return (
+                  <div className="grid gap-5 lg:grid-cols-2">
+                    {shipments.length ? (
+                      shipments.map((s: any) => (
+                        <Card key={s.id}>
+                          <CardHeader>
+                            <div className="flex justify-between">
+                              <div>
+                                <div className="mono font-semibold">
+                                  {s.number}
+                                </div>
+                                <div className="mt-1 text-sm text-slate-500">
+                                  {s.truckNumber ||
+                                    s.truck_number ||
+                                    "Truck not assigned"}{" "}
+                                  ·{" "}
+                                  {s.driverName ||
+                                    s.driver_name ||
+                                    "Driver not assigned"}
+                                </div>
+                              </div>
+                              <Badge
+                                tone={
+                                  s.status === "DELIVERED" ? "green" : "amber"
+                                }
+                              >
+                                {s.status.replaceAll("_", " ")}
+                              </Badge>
+                            </div>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <Field
+                                label="Planned dispatch"
+                                value={s.planned_dispatch || s.plannedDispatch}
+                              />
+                              <Field
+                                label="Expected arrival"
+                                value={s.expected_arrival || s.expectedArrival}
+                              />
+                              <Field
+                                label="Actual cost"
+                                value={`₹ ${s.actual_cost || s.actualCost || "—"}`}
+                              />
+                              <Field
+                                label="POD"
+                                value={
+                                  s.status === "DELIVERED"
+                                    ? "Confirmed"
+                                    : "Awaiting POD"
+                                }
+                              />
+                            </div>
+                            <div className="mt-4 space-y-2">
+                              {s.lr_document_version_id && (
+                                <div>
+                                  <span className="mr-2 text-xs text-slate-500">
+                                    LR:
+                                  </span>
+                                  <DocumentLink
+                                    documentVersionId={s.lr_document_version_id}
+                                    filename={s.lrFilename}
+                                  />
+                                </div>
+                              )}
+                              {(po.consignments || [])
+                                .filter((c: any) => c.shipment_id === s.id)
+                                .map((c: any) => (
+                                  <div key={c.id}>
+                                    <span className="mr-2 text-xs text-slate-500">
+                                      Consignment:
+                                    </span>
+                                    <DocumentLink
+                                      documentVersionId={c.document_version_id}
+                                      filename={c.filename}
+                                    />
+                                  </div>
+                                ))}
+                              {(po.pods || [])
+                                .filter((p: any) =>
+                                  p.shipmentIds?.includes(s.id),
+                                )
+                                .map((p: any) => (
+                                  <div key={p.id}>
+                                    <span className="mr-2 text-xs text-slate-500">
+                                      POD:
+                                    </span>
+                                    <DocumentLink
+                                      documentVersionId={p.document_version_id}
+                                      filename={p.filename}
+                                    />
+                                  </div>
+                                ))}
+                            </div>
+                            {onConfirmPod &&
+                              [
+                                "DISPATCHED",
+                                "IN_TRANSIT",
+                                "ARRIVED",
+                                "UNLOADING",
+                                "PARTIALLY_DELIVERED",
+                                "DELIVERY_ISSUE",
+                              ].includes(s.status) &&
+                              !(po.pods || []).some((p: any) =>
+                                p.shipmentIds?.includes(s.id),
+                              ) && (
+                                <button
+                                  onClick={() => onConfirmPod(s.id)}
+                                  className="mt-4 text-sm font-semibold text-emerald-700 underline"
+                                >
+                                  Confirm POD
+                                </button>
+                              )}
+                          </CardContent>
+                        </Card>
+                      ))
+                    ) : (
+                      <Alert>
+                        <Truck className="mr-2 inline" size={16} />
+                        Shipment planning has not started.
+                      </Alert>
+                    )}
+                  </div>
+                );
+              if (active === "POD & Discrepancies")
+                return (
+                  <Card>
+                    <CardHeader>
+                      <h2 className="font-semibold">
+                        POD and delivery discrepancies
+                      </h2>
+                    </CardHeader>
+                    <CardContent>
+                      {po.pods?.length ? (
+                        <div className="space-y-3">
+                          {po.pods.map((p: any) => (
+                            <div
+                              className="rounded-xl bg-slate-50 p-4"
+                              key={p.id}
+                            >
+                              <DocumentLink
+                                documentVersionId={p.document_version_id}
+                                filename={p.filename}
+                              />
+                              <div className="mt-1 text-sm text-slate-500">
+                                Uploaded{" "}
+                                {p.confirmed_at || p.confirmedAt || "—"}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <Alert>
+                          <FileText className="mr-2 inline" size={16} />
+                          No POD has been confirmed for this PO.
+                        </Alert>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              if (active === "Invoice")
+                return (
+                  <Card>
+                    <CardHeader>
+                      <h2 className="font-semibold">Invoice gate</h2>
+                    </CardHeader>
+                    <CardContent>
+                      {po.invoice ? (
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          <Field
+                            label="Invoice number"
+                            value={po.invoice.number}
+                          />
+                          <Field
+                            label="Amount"
+                            value={`₹ ${po.invoice.amount}`}
+                          />
+                          <Field
+                            label="File"
+                            value={
+                              <DocumentLink
+                                documentVersionId={
+                                  po.invoice.document_version_id
+                                }
+                                filename={po.invoice.filename}
+                              />
+                            }
+                          />
+                        </div>
+                      ) : (
+                        <Alert>
+                          <ReceiptText className="mr-2 inline" size={16} />
+                          Invoice upload is available only after full delivery
+                          or approved short close.
+                        </Alert>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              return (
+                <Card>
+                  <CardHeader>
+                    <h2 className="font-semibold">Immutable audit activity</h2>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex items-center gap-3 text-sm text-slate-500">
+                      <History size={18} />
+                      Audit events are available in the Audit Log screen.
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            }}
+          </Tabs>
+        </div>
+      </div>
+    </div>
+  );
+}

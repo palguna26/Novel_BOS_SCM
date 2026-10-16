@@ -59,6 +59,7 @@ export class CopilotService {
   private readonly requireZdr = process.env.OPENROUTER_COPILOT_ZDR === 'true';
   private readonly denyDataCollection = process.env.OPENROUTER_COPILOT_DATA_COLLECTION === 'deny';
   private readonly requestCounts = new Map<string, { count: number; resetAt: number }>();
+  private readonly maxTrackedUsers = 10_000;
 
   constructor(private readonly app: AppService) {}
 
@@ -253,6 +254,10 @@ export class CopilotService {
     const now = Date.now();
     const current = this.requestCounts.get(userId);
     if (!current || current.resetAt <= now) {
+      if (!current && this.requestCounts.size >= this.maxTrackedUsers) {
+        const oldest = this.requestCounts.keys().next().value;
+        if (oldest) this.requestCounts.delete(oldest);
+      }
       this.requestCounts.set(userId, { count: 1, resetAt: now + 60_000 });
       return;
     }

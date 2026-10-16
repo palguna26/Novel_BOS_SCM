@@ -10,6 +10,7 @@ export interface AuthenticatedUser {
   canRead: boolean;
   canWrite: boolean;
   canApprove: boolean;
+  accessToken?: string;
 }
 
 @Injectable()
@@ -26,6 +27,15 @@ export class SupabaseService {
 
   schema(name: string) {
     return this.client.schema(name);
+  }
+
+  userClient(user: AuthenticatedUser) {
+    if (!user.accessToken) throw new Error('A user access token is required for scoped database access');
+    return createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_ANON_KEY!,
+      { auth: { autoRefreshToken: false, persistSession: false }, global: { headers: { Authorization: `Bearer ${user.accessToken}` } } },
+    );
   }
 
   async signInWithPassword(email: string, password: string) {
@@ -78,6 +88,7 @@ export class SupabaseService {
       canRead: access.can_read,
       canWrite: access.can_write || profile.role === 'SUPER_ADMIN',
       canApprove: access.can_approve || profile.role === 'SUPER_ADMIN',
+      accessToken: token,
     };
   }
 }

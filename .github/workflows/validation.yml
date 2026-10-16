@@ -1,0 +1,47 @@
+name: SCM validation
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+
+  database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start Supabase
+        run: pnpm exec supabase start
+      - name: Reset database from migrations
+        run: pnpm exec supabase db reset --local --no-seed
+      - name: Validate schema
+        run: pnpm exec supabase db query --local --file supabase/tests/scm_v2_validation.sql
+      - name: Run workflow smoke test
+        run: pnpm exec supabase db query --local --file supabase/tests/scm_v2_workflow_smoke.sql
+      - name: Run sales integration validation
+        run: pnpm exec supabase db query --local --file supabase/tests/sales_integration_validation.sql
+      - name: Stop Supabase
+        if: always()
+        run: pnpm exec supabase stop --no-backup

@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: novel-scm-api
+    runtime: node
+    rootDir: apps/api
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/docs
+    autoDeployTrigger: commit
+    envVars:
+      - key: SUPABASE_URL
+        value: https://czdixzpfqafyeckjxpit.supabase.co
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: WEB_URL
+        sync: false
+      - key: DOCUMENT_STORAGE_BUCKET
+        value: scm-documents
+      - key: EMAIL_CAPTURE
+        value: "true"
+      - key: SCM_SCHEMA_MODE
+        value: v2
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: openai/gpt-4o-mini
+      - key: OPENROUTER_COPILOT_MODEL
+        value: openai/gpt-4.1-mini
+      - key: OPENROUTER_COPILOT_MAX_TOKENS
+        value: "8192"
+      - key: OPENROUTER_COPILOT_MAX_REQUESTS_PER_MINUTE
+        value: "20"
+      - key: OPENROUTER_COPILOT_ZDR
+        value: "false"
+      - key: OPENROUTER_COPILOT_DATA_COLLECTION
+        value: allow
+      - key: OPENROUTER_API_URL
+        value: https://openrouter.ai/api/v1/chat/completions
+      - key: OPENROUTER_TIMEOUT_MS
+        value: "30000"
+      - key: SALES_INTEGRATION_TOKEN
+        sync: false
+      - key: SALES_INTEGRATION_COMPANY_ID
+        sync: false
+      - key: SALES_INTEGRATION_SCOPES
+        value: master:read,inventory:read,po:read,fulfilment:read,movement:read
+
+  - type: web
+    name: novel-scm-web
+    runtime: static
+    rootDir: apps/web
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeployTrigger: commit
+    envVars:
+      - key: VITE_API_URL
+        sync: false

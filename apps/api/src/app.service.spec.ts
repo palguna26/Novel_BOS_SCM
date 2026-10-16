@@ -38,7 +38,8 @@ describe('AppService v2 command mapping', () => {
 
   it('maps acceptance to the immutable v2 decision RPC', async () => {
     const { app, supabase } = service();
-    await app.acceptPo(user, 'po-1', 'accept-1');
+    await expect(app.acceptPo(user, 'po-1', 'accept-1')).rejects.toBeInstanceOf(ForbiddenException);
+    await app.acceptPo(approver, 'po-1', 'accept-1');
     expect(supabase.rpc).toHaveBeenCalledWith('scm', 'record_acceptance', expect.objectContaining({ p_purchase_order_id: 'po-1', p_decision: 'ACCEPTED', p_idempotency_key: 'accept-1' }));
   });
 
@@ -68,7 +69,7 @@ describe('AppService v2 command mapping', () => {
 
   it('requires a rejection reason', async () => {
     const { app } = service();
-    await expect(app.rejectPo(user, 'po-1', '', 'reject-1')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(app.rejectPo(approver, 'po-1', '', 'reject-1')).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('requires approval access for short close and stock reversal', async () => {

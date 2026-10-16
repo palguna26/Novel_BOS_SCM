@@ -1,54 +1,1468 @@
-import { useMemo, useState, type InputHTMLAttributes, type SelectHTMLAttributes } from "react";
+import {
+  useMemo,
+  useState,
+  type InputHTMLAttributes,
+  type SelectHTMLAttributes,
+} from "react";
 import { AlertTriangle, History, Plus, X } from "lucide-react";
 
-type Props = { rows: any[]; masters: any; transactions?: any[]; onSave: (path: string, body: any) => Promise<any>; onRefresh: () => Promise<void> };
+type Props = {
+  rows: any[];
+  masters: any;
+  transactions?: any[];
+  onSave: (path: string, body: any) => Promise<any>;
+  onRefresh: () => Promise<void>;
+};
 const field = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm";
 const tabs = ["Stock", "SKUs", "Warehouses", "Mappings", "UOMs & routes"];
-function Modal({ title, children, close }: any) { return <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4 sm:p-6"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"><div className="mb-5 flex items-center justify-between"><h3 className="text-lg font-semibold">{title}</h3><button aria-label="Close dialog" onClick={close}><X size={18}/></button></div>{children}</div></div>; }
-function Field({ label, ...p }: { label: string } & InputHTMLAttributes<HTMLInputElement>) { return <label className="block text-sm font-medium">{label}<input className={`${field} mt-1`} {...p}/></label>; }
-function Select({ label, children, ...p }: { label: string; children: any } & SelectHTMLAttributes<HTMLSelectElement>) { return <label className="block text-sm font-medium">{label}<select className={`${field} mt-1 bg-white`} {...p}>{children}</select></label>; }
-function Form({ error, submit="Save", children, onSubmit }: any) { return <form className="space-y-4" onSubmit={onSubmit}>{error && <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}{children}<button className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">{submit}</button></form>; }
-function Add({ children, onClick }: any) { return <button onClick={onClick} className="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white"><Plus size={15}/>{children}</button>; }
-function List({ title, action, headers, children, columns, minWidth = "min-w-[620px]" }: any) { return <div className="panel overflow-x-auto"><div className="flex items-center justify-between p-5"><h3 className="font-semibold">{title}</h3>{action}</div><div className={`grid ${minWidth} bg-slate-50 px-5 py-3 text-xs uppercase tracking-wide text-slate-400`} style={{gridTemplateColumns:columns || `repeat(${headers.length}, minmax(0, 1fr))`}}>{headers.map((h:string)=><span key={h}>{h}</span>)}</div>{children}</div>; }
-function Metric({ label, value, green }: any) { return <div className="panel p-5"><div className="text-sm text-slate-500">{label}</div><div className={`mt-2 text-3xl font-semibold ${green ? "text-emerald-700" : ""}`}>{value}</div></div>; }
-function StockDetail({value}:any){return <div><div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3"><Metric label="Physical" value={value?.physical||0}/><Metric label="Blocked" value={value?.blocked||0}/><Metric label="In transit" value={value?.inTransit||0}/><Metric label="Threshold" value={value?.threshold||0}/><Metric label="Allocatable" value={value?.allocatable||0} green/></div><div className="overflow-x-auto rounded-xl border border-slate-100"><div className="grid min-w-[800px] grid-cols-6 bg-slate-50 px-4 py-3 text-xs uppercase tracking-wide text-slate-400"><span>Warehouse</span><span>Physical</span><span>Blocked</span><span>In transit</span><span>Threshold</span><span>Allocatable</span></div>{(value?.warehouses||[]).map((r:any)=><div key={r.id} className="grid min-w-[800px] grid-cols-6 border-t border-slate-50 px-4 py-4 text-sm"><span className="font-medium">{r.warehouse?.name||"Unknown warehouse"}</span><span>{r.physical}</span><span>{r.blocked}</span><span>{r.inTransit||0}</span><span>{r.threshold||0}</span><span className={r.allocatable===0?"font-semibold text-amber-700":"font-semibold text-emerald-700"}>{r.allocatable}</span></div>)}</div></div>}
-
-export function InventoryWorkspace({ rows, masters, transactions = [], onSave, onRefresh }: Props) {
-  const [tab,setTab]=useState("Stock"), [modal,setModal]=useState<string|null>(null), [edit,setEdit]=useState<any>(null), [error,setError]=useState(""), [search,setSearch]=useState(""), [expandedSkus,setExpandedSkus]=useState<Record<string, boolean>>({}), [stockEditId,setStockEditId]=useState<string|null>(null), [stockDraft,setStockDraft]=useState<any>({}), [thresholdEditId,setThresholdEditId]=useState<string|null>(null), [thresholdDraft,setThresholdDraft]=useState<any>({}), [skuEditId,setSkuEditId]=useState<string|null>(null), [skuDraft,setSkuDraft]=useState<any>({});
-  const run=async(path:string,body:any)=>{try{setError("");await onSave(path,body);setModal(null);setEdit(null);await onRefresh();return true;}catch(e:any){setError(e.message);return false;}};
-  const filtered=useMemo(()=>rows.filter(r=>`${r.sku?.code} ${r.sku?.name} ${r.warehouse?.name}`.toLowerCase().includes(search.toLowerCase())),[rows,search]);
-  const channelIdentifiers=(masters.itemIdentifiers||[]).filter((x:any)=>x.identifier_type==="CHANNEL_SKU");
-  const globalIdentifiers=(masters.itemIdentifiers||[]).filter((x:any)=>x.identifier_type!=="CHANNEL_SKU");
-  const channelName=(id:string)=>((masters.platforms||[]).find((x:any)=>x.id===id)?.name||id);
-  const activePlatforms=(masters.platforms||[]).filter((x:any)=>x.active!==false);
-  const activeWarehouses=(masters.warehouses||[]).filter((x:any)=>x.active!==false);
-  const channelColumns=activePlatforms.filter((x:any)=>channelIdentifiers.some((i:any)=>i.channel_id===x.id));
-  const channelValue=(skuId:string,channelId:string)=>channelIdentifiers.filter((x:any)=>x.item_id===skuId&&x.channel_id===channelId&&x.active!==false).map((x:any)=>x.value).join(", ");
-  const productCodes=(skuId:string)=>globalIdentifiers.filter((x:any)=>x.item_id===skuId&&x.active!==false).map((x:any)=>`${x.identifier_type}: ${x.value}`).join(" · ");
-  const total=filtered.reduce((a,r)=>({physical:a.physical+r.physical,blocked:a.blocked+r.blocked,inTransit:a.inTransit+Number(r.inTransit||0),allocatable:a.allocatable+r.allocatable,threshold:a.threshold+Number(r.threshold||0)}),{physical:0,blocked:0,inTransit:0,allocatable:0,threshold:0});
-  const skuStock=useMemo(()=>Object.values(filtered.reduce((acc:any,r:any)=>{const id=r.skuId||r.item_id||r.sku?.id;if(!id)return acc;const current=acc[id]||{id,sku:r.sku,physical:0,blocked:0,inTransit:0,allocatable:0,threshold:0,warehouses:[]};current.physical+=Number(r.physical||0);current.blocked+=Number(r.blocked||0);current.inTransit+=Number(r.inTransit||0);current.allocatable+=Number(r.allocatable||0);current.threshold+=Number(r.threshold||0);current.warehouses.push(r);acc[id]=current;return acc;},{} as Record<string,any>)),[filtered]);
-  const open=(name:string,value?:any)=>{setError("");setEdit(value||null);setModal(name);};
-  const startStockEdit=(value:any)=>{setError("");setStockEditId(value.id);setStockDraft({skuId:value.skuId||value.sku?.id,warehouseId:value.warehouses?.[0]?.warehouseId||value.warehouses?.[0]?.warehouse_id||value.warehouses?.[0]?.warehouse?.id,quantity:"",reason:""});};
-  const startSkuEdit=(value:any)=>{setError("");setSkuEditId(value.id);setSkuDraft({code:value.code||"",name:value.name||"",itemClass:value.item_class||"FG",uomId:value.base_uom_id||""});};
-  const startThresholdEdit=(row:any, skuId:string)=>{setError("");setThresholdEditId(row.id);setThresholdDraft({warehouseId:row.warehouseId||row.site_id,skuId,threshold:row.threshold??0});};
-  return <><div className="mb-7 flex items-end justify-between"><div><p className="text-sm text-slate-500">Stock and master data</p><h2 className="mt-2 text-3xl font-semibold">Inventory</h2></div>{tab==="Stock"&&<Add onClick={()=>open("stock")}>Adjust stock</Add>}</div><div className="mb-5 flex gap-2 overflow-x-auto border-b border-slate-200">{tabs.map(x=><button key={x} onClick={()=>setTab(x)} className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${tab===x?"border-emerald-600 text-emerald-700":"border-transparent text-slate-500"}`}>{x}</button>)}</div>
-    {tab==="Stock"&&<><div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5"><Metric label="Physical" value={total.physical}/><Metric label="Blocked" value={total.blocked}/><Metric label="In transit" value={total.inTransit}/><Metric label="Threshold" value={total.threshold}/><Metric label="Allocatable" value={total.allocatable} green/></div><List title="SKU stock" action={<div className="flex gap-3"><input className={field} placeholder="Search SKU" value={search} onChange={e=>setSearch(e.target.value)}/><button onClick={()=>open("history")} className="flex items-center gap-2 text-sm font-semibold text-emerald-700"><History size={16}/>History</button></div>} headers={["SKU","Warehouses","Physical","Blocked","In transit","Threshold","Allocatable"]} columns="1.4fr repeat(6,minmax(110px,1fr))" minWidth="min-w-[900px]">{skuStock.map((r:any)=>{const expanded=Boolean(expandedSkus[r.id]);const editing=stockEditId===r.id;return <div key={r.id}><button type="button" onClick={()=>setExpandedSkus(current=>({...current,[r.id]:!current[r.id]}))} className="grid w-full min-w-[900px] cursor-pointer grid-cols-[1.4fr_repeat(6,minmax(110px,1fr))] border-t border-slate-50 px-5 py-4 text-left text-sm hover:bg-slate-50"><div><b>{r.sku?.code||r.id}</b><div className="text-xs text-slate-400">{r.sku?.name||"Unknown SKU"}</div><div className="mt-1 text-xs font-semibold text-emerald-700">{expanded?"Hide warehouse details":"View warehouse details"}</div></div><span>{r.warehouses.length}</span><span>{r.physical}</span><span>{r.blocked}</span><span>{r.inTransit}</span><span>{r.threshold}</span><span className={r.allocatable===0?"font-semibold text-amber-700":"font-semibold text-emerald-700"}>{r.allocatable===0&&<AlertTriangle size={13} className="mr-1 inline"/>}{r.allocatable}</span></button>{expanded&&<div className="border-t border-emerald-100 bg-emerald-50/30 px-5 py-6"><div className="mb-4 flex items-center justify-between"><div className="text-sm font-semibold">Warehouse details</div>{!editing&&<button onClick={()=>startStockEdit(r)} className="text-sm font-semibold text-emerald-700">Edit stock</button>}</div>{editing?<form className="mb-5 rounded-xl border border-emerald-200 bg-white p-4" onSubmit={async e=>{e.preventDefault();if(await run("/api/inventory/add",{...stockDraft,quantity:Number(stockDraft.quantity)}))setStockEditId(null);}}><div className="grid gap-3 sm:grid-cols-3"><Select label="Warehouse" required value={stockDraft.warehouseId||""} onChange={e=>setStockDraft({...stockDraft,warehouseId:e.target.value})}><option value="">Select warehouse</option>{(masters.warehouses||[]).map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}</Select><Field label="Quantity to add" type="number" min="0.001" step="any" required value={stockDraft.quantity||""} onChange={e=>setStockDraft({...stockDraft,quantity:e.target.value})}/><Field label="Reason" required value={stockDraft.reason||""} onChange={e=>setStockDraft({...stockDraft,reason:e.target.value})}/></div><div className="mt-4 flex gap-2"><button type="submit" className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save stock adjustment</button><button type="button" onClick={()=>setStockEditId(null)} className="rounded-lg border px-4 py-2 text-sm font-semibold">Cancel</button></div></form>:null}<div className="space-y-3">{r.warehouses.map((row:any)=><div key={row.id} className="rounded-xl border border-white bg-white p-4"><div className="flex items-center justify-between"><div><b>{row.warehouse?.name||"Unknown warehouse"}</b><div className="text-xs text-slate-500">Physical {row.physical} · Blocked {row.blocked} · In transit {row.inTransit||0} · Threshold {row.threshold||0} · Allocatable {row.allocatable}</div></div>{thresholdEditId!==row.id&&<button onClick={()=>startThresholdEdit(row,r.id)} className="text-sm font-semibold text-emerald-700">Edit threshold</button>}</div>{thresholdEditId===row.id&&<form className="mt-3 flex flex-wrap items-end gap-3" onSubmit={async e=>{e.preventDefault();if(await run("/api/inventory/policies",{...thresholdDraft,threshold:Number(thresholdDraft.threshold)}))setThresholdEditId(null);}}><Field label="Protected threshold" type="number" min="0" step="any" required value={thresholdDraft.threshold??0} onChange={e=>setThresholdDraft({...thresholdDraft,threshold:e.target.value})}/><button type="submit" className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save threshold</button><button type="button" onClick={()=>setThresholdEditId(null)} className="rounded-lg border px-4 py-2 text-sm font-semibold">Cancel</button></form>}</div>)}</div></div>}</div>})}</List></>}
-    {tab==="SKUs"&&<List title="SKUs" action={<Add onClick={()=>open("sku")}>Add SKU</Add>} headers={["Code / title","Class","Base UOM","Status",""]}>{(masters.skus||[]).map((x:any)=>{const editing=skuEditId===x.id;return <div key={x.id} className={`border-t border-slate-50 px-5 py-4 text-sm ${editing?"bg-emerald-50/30":""}`}>{editing?<><div className="grid gap-3 sm:grid-cols-4"><Field label="SKU code" required value={skuDraft.code||""} onChange={e=>setSkuDraft({...skuDraft,code:e.target.value})}/><Field label="Product title" required value={skuDraft.name||""} onChange={e=>setSkuDraft({...skuDraft,name:e.target.value})}/><Select label="Item class" value={skuDraft.itemClass||"FG"} onChange={e=>setSkuDraft({...skuDraft,itemClass:e.target.value})}>{["FG","SFG","RM","PM","CONSUMABLE","SPARE","KIT"].map((v:string)=><option key={v}>{v}</option>)}</Select><Select label="Base UOM" required value={skuDraft.uomId||""} onChange={e=>setSkuDraft({...skuDraft,uomId:e.target.value})}><option value="">Select UOM</option>{(masters.uoms||[]).map((u:any)=><option key={u.id} value={u.id}>{u.code} — {u.name}</option>)}</Select></div><div className="mt-4 flex gap-2"><button onClick={async()=>{if(await run(`/api/skus/${x.id}`,{...skuDraft}))setSkuEditId(null);}} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">Save SKU</button><button onClick={()=>setSkuEditId(null)} className="rounded-lg border px-4 py-2 text-sm font-semibold">Cancel</button></div></>:<div className="grid grid-cols-[1.6fr_1fr_1fr_1fr_80px] items-center"><div><b>{x.code}</b><div className="text-xs text-slate-400">{x.name}</div></div><span>{x.item_class}</span><span>{(masters.uoms||[]).find((u:any)=>u.id===x.base_uom_id)?.code||"—"}</span><span>{x.lifecycle_status}</span><button onClick={()=>startSkuEdit(x)} className="text-right font-semibold text-emerald-700">Edit</button></div>}</div>})}</List>}
-    {tab==="Warehouses"&&<List title="Warehouses" action={<div className="flex gap-2"><button onClick={()=>open("location")} className="rounded-lg border px-3 py-2 text-sm font-semibold">Add location</button><Add onClick={()=>open("warehouse")}>Add warehouse</Add></div>} headers={["Warehouse","City / state","Locations","Status",""]}>{(masters.warehouses||[]).map((x:any)=><div key={x.id} className="grid grid-cols-[1.5fr_1fr_1fr_1fr_80px] border-t border-slate-50 px-5 py-4 text-sm"><div><b>{x.name}</b><div className="text-xs text-slate-400">{x.code}</div></div><span>{[x.city,x.state].filter(Boolean).join(", ")||"—"}</span><span>{(masters.locations||[]).filter((l:any)=>l.site_id===x.id).length}</span><span>{x.active?"Active":"Inactive"}</span><button onClick={()=>open("warehouse",x)} className="text-right font-semibold text-emerald-700">Edit</button></div>)}</List>}
-    {tab==="Mappings"&&<div className="space-y-5">
-      <div className="rounded-2xl border border-slate-100 bg-white p-5"><div className="flex items-start justify-between gap-4"><div><h3 className="font-semibold">Product and channel SKU mappings</h3><p className="mt-1 text-sm text-slate-500">One product can have a different platform SKU on each channel. These codes identify the same product on Amazon, Flipkart, Blinkit, and other channels.</p></div><Add onClick={()=>open("mapping")}>Add channel SKU</Add></div>
-        <div className="mt-5 overflow-x-auto"><div className="min-w-[760px]"><div className="grid border-y border-slate-100 bg-slate-50 px-4 py-3 text-xs uppercase tracking-wide text-slate-400" style={{gridTemplateColumns:`1.35fr 1fr repeat(${Math.max(channelColumns.length,1)}, minmax(150px,1fr))`}}><span>Product</span><span>Global product codes</span>{channelColumns.length?channelColumns.map((x:any)=><span key={x.id}>{x.name}</span>):<span>Platform SKU</span>}</div>{(masters.skus||[]).map((x:any)=><div key={x.id} className="grid items-center border-b border-slate-50 px-4 py-4 text-sm" style={{gridTemplateColumns:`1.35fr 1fr repeat(${Math.max(channelColumns.length,1)}, minmax(150px,1fr))`}}><div><b>{x.name}</b><div className="mt-1 text-xs text-slate-400">Internal SKU: {x.code}</div></div><span className="text-xs text-slate-500">{productCodes(x.id)||"—"}</span>{channelColumns.length?channelColumns.map((c:any)=><span key={c.id} className="font-medium">{channelValue(x.id,c.id)||<span className="font-normal text-slate-400">Not mapped</span>}</span>):<span className="text-slate-400">No channel codes</span>}</div>)}</div></div>
+function Modal({ title, children, close }: any) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-30 flex items-center justify-center bg-black/30 p-4 sm:p-6"
+    >
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <button aria-label="Close dialog" onClick={close}>
+            <X size={18} />
+          </button>
+        </div>
+        {children}
       </div>
-      <List title="Fallback destination mappings" action={<button onClick={()=>open("mapping")} className="rounded-lg border px-3 py-2 text-sm font-semibold">Add fallback</button>} headers={["Channel","Destination","Source warehouse","Status"]}>{(masters.mappings||[]).map((x:any)=><div key={x.id} className="grid grid-cols-4 border-t border-slate-50 px-5 py-4 text-sm"><span>{channelName(x.channel_id)}</span><span><b>{x.destination_key||x.destination_name}</b><div className="text-xs text-slate-400">{x.destination_name||""}</div></span><span>{(masters.warehouses||[]).find((w:any)=>w.id===x.source_site_id)?.name||x.source_site_id||"—"}</span><span>{x.active!==false?"Active":"Inactive"}</span></div>)}</List>
-      <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">Source and destination warehouses normally come from the PO or appointment. Use this fallback only when the document does not provide a clear source or destination.</div>
-    </div>}
-    {tab==="UOMs & routes"&&<div className="grid gap-5 lg:grid-cols-2"><List title="Units of measure" action={<Add onClick={()=>open("uom")}>Add UOM</Add>} headers={["Code","Name","Dimension"]}>{(masters.uoms||[]).map((x:any)=><div key={x.id} className="grid grid-cols-3 border-t border-slate-50 px-5 py-4 text-sm"><b>{x.code}</b><span>{x.name}</span><span>{x.dimension}</span></div>)}</List><List title="Route estimates" action={<Add onClick={()=>open("route")}>Add route</Add>} headers={["Warehouse","Destination city","Transit"]}>{(masters.routes||[]).map((x:any)=><div key={x.id} className="grid grid-cols-3 border-t border-slate-50 px-5 py-4 text-sm"><span>{(masters.warehouses||[]).find((w:any)=>w.id===x.source_site_id)?.name||x.source_site_id}</span><span>{x.destination_city||x.destination_key}</span><span>{x.transit_hours} h</span></div>)}</List></div>}
-    {modal==="stock"&&<Modal title="Adjust stock" close={()=>setModal(null)}><StockForm masters={masters} error={error} save={(b:any)=>run("/api/inventory/add",b)}/></Modal>}{modal==="sku"&&<Modal title={edit?"Edit SKU":"Add SKU"} close={()=>setModal(null)}><SkuForm value={edit} masters={masters} error={error} save={(b:any)=>run(edit?`/api/skus/${edit.id}`:"/api/skus",b)}/></Modal>}{modal==="warehouse"&&<Modal title={edit?"Edit warehouse":"Add warehouse"} close={()=>setModal(null)}><WarehouseForm value={edit} error={error} save={(b:any)=>run(edit?`/api/warehouses/${edit.id}`:"/api/warehouses",b)}/></Modal>}{modal==="location"&&<Modal title="Add warehouse location" close={()=>setModal(null)}><LocationForm masters={masters} error={error} save={(b:any)=>run("/api/locations",b)}/></Modal>}{modal==="mapping"&&<Modal title="Add channel mapping" close={()=>setModal(null)}><MappingForm masters={masters} error={error} save={(b:any)=>run("/api/mappings",b)}/></Modal>}{modal==="uom"&&<Modal title="Add unit of measure" close={()=>setModal(null)}><UomForm error={error} save={(b:any)=>run("/api/uoms",b)}/></Modal>}{modal==="route"&&<Modal title="Add route estimate" close={()=>setModal(null)}><RouteForm masters={masters} error={error} save={(b:any)=>run("/api/routes",b)}/></Modal>}{modal==="history"&&<Modal title={edit?.sku ? "SKU warehouse stock" : "Stock history"} close={()=>setModal(null)}>{edit?.sku?<StockDetail value={edit}/>:<div className="max-h-80 space-y-3 overflow-auto">{transactions.length===0&&<div className="py-5 text-sm text-slate-500">No stock transactions found.</div>}{transactions.map((x:any)=><div key={x.id} className="rounded-lg border border-slate-100 p-3 text-sm"><div className="flex justify-between font-semibold"><span>{x.transaction_type}</span><span className={x.status==="REVERSED"?"text-red-600":"text-emerald-700"}>{x.status}</span></div><div className="mt-1 text-xs text-slate-500">{x.reason||"No reason"} · {new Date(x.created_at).toLocaleString()}</div></div>)}</div>}</Modal>}</>;
+    </div>
+  );
 }
-function StockForm({masters,error,save}:any){const [v,setV]=useState<any>({});return <Form error={error} onSubmit={(e:any)=>{e.preventDefault();save({...v,quantity:Number(v.quantity)})}}><Select label="SKU" required value={v.skuId||""} onChange={e=>setV({...v,skuId:e.target.value})}><option value="">Select SKU</option>{(masters.skus||[]).map((x:any)=><option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</Select><Select label="Warehouse" required value={v.warehouseId||""} onChange={e=>setV({...v,warehouseId:e.target.value})}><option value="">Select warehouse</option>{(masters.warehouses||[]).map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}</Select><Select label="Location" value={v.locationId||""} onChange={e=>setV({...v,locationId:e.target.value})}><option value="">Default location</option>{(masters.locations||[]).filter((x:any)=>x.site_id===v.warehouseId).map((x:any)=><option key={x.id} value={x.id}>{x.code}</option>)}</Select><Field label="Quantity" type="number" min="0.001" step="any" required value={v.quantity||""} onChange={(e:any)=>setV({...v,quantity:e.target.value})}/><Field label="Reason" required value={v.reason||""} onChange={(e:any)=>setV({...v,reason:e.target.value})}/></Form>}
-function SkuForm({value,masters,error,save}:any){const [v,setV]=useState<any>(value||{});return <Form error={error} onSubmit={(e:any)=>{e.preventDefault();save({...v,uomId:v.uomId||v.base_uom_id})}}><Field label="SKU code" required value={v.code||""} onChange={(e:any)=>setV({...v,code:e.target.value})}/><Field label="Product title" required value={v.name||""} onChange={(e:any)=>setV({...v,name:e.target.value})}/><Select label="Item class" value={v.itemClass||v.item_class||"FG"} onChange={e=>setV({...v,itemClass:e.target.value})}>{["FG","SFG","RM","PM","CONSUMABLE","SPARE","KIT"].map(x=><option key={x}>{x}</option>)}</Select><Select label="Base UOM" required value={v.uomId||v.base_uom_id||""} onChange={e=>setV({...v,uomId:e.target.value})}><option value="">Select UOM</option>{(masters.uoms||[]).map((x:any)=><option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</Select></Form>}
-function WarehouseForm({value,error,save}:any){const [v,setV]=useState<any>(value||{});return <Form error={error} onSubmit={(e:any)=>{e.preventDefault();save(v)}}><Field label="Warehouse code" required value={v.code||""} onChange={(e:any)=>setV({...v,code:e.target.value})}/><Field label="Warehouse name" required value={v.name||""} onChange={(e:any)=>setV({...v,name:e.target.value})}/><Field label="City" required value={v.city||""} onChange={(e:any)=>setV({...v,city:e.target.value})}/><Field label="State" value={v.state||""} onChange={(e:any)=>setV({...v,state:e.target.value})}/><Field label="Address line 1" value={v.addressLine1||v.address_line1||""} onChange={(e:any)=>setV({...v,addressLine1:e.target.value})}/><Field label="Address line 2" value={v.addressLine2||v.address_line2||""} onChange={(e:any)=>setV({...v,addressLine2:e.target.value})}/><Field label="Postal code" value={v.postalCode||v.postal_code||""} onChange={(e:any)=>setV({...v,postalCode:e.target.value})}/></Form>}
-function LocationForm({masters,error,save}:any){const [v,setV]=useState<any>({});return <Form error={error} onSubmit={(e:any)=>{e.preventDefault();save(v)}}><Select label="Warehouse" required value={v.warehouseId||""} onChange={e=>setV({...v,warehouseId:e.target.value})}><option value="">Select warehouse</option>{(masters.warehouses||[]).map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}</Select><Field label="Location code" required value={v.code||""} onChange={(e:any)=>setV({...v,code:e.target.value})}/><Field label="Location name" required value={v.name||""} onChange={(e:any)=>setV({...v,name:e.target.value})}/><Select label="Type" required value={v.locationType||""} onChange={e=>setV({...v,locationType:e.target.value})}><option value="">Select type</option>{["WAREHOUSE","ZONE","RACK","BIN","QUARANTINE","REJECTED","RETURN"].map(x=><option key={x}>{x}</option>)}</Select></Form>}
-function MappingForm({masters,error,save}:any){const [v,setV]=useState<any>({mappingType:"CHANNEL_SKU"});return <Form error={error} onSubmit={(e:any)=>{e.preventDefault();save(v)}}><Select label="Mapping type" value={v.mappingType} onChange={e=>setV({...v,mappingType:e.target.value})}><option value="CHANNEL_SKU">Channel SKU</option><option value="DESTINATION">Destination</option></Select><Select label="Channel" required value={v.channelId||""} onChange={e=>setV({...v,channelId:e.target.value})}><option value="">Select channel</option>{(masters.platforms||[]).map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}</Select>{v.mappingType==="CHANNEL_SKU"?<><Select label="Internal SKU" required value={v.skuId||""} onChange={e=>setV({...v,skuId:e.target.value})}><option value="">Select SKU</option>{(masters.skus||[]).map((x:any)=><option key={x.id} value={x.id}>{x.code}</option>)}</Select><Field label="External product code" required value={v.value||""} onChange={(e:any)=>setV({...v,value:e.target.value})}/></>:<><Field label="Destination key" required value={v.destinationKey||""} onChange={(e:any)=>setV({...v,destinationKey:e.target.value})}/><Field label="Destination name" required value={v.destinationName||""} onChange={(e:any)=>setV({...v,destinationName:e.target.value})}/><Select label="Warehouse" required value={v.warehouseId||""} onChange={e=>setV({...v,warehouseId:e.target.value})}><option value="">Select warehouse</option>{(masters.warehouses||[]).map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}</Select><Select label="Source location" required value={v.locationId||""} onChange={e=>setV({...v,locationId:e.target.value})}><option value="">Select location</option>{(masters.locations||[]).filter((x:any)=>x.site_id===v.warehouseId).map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}</Select></>}</Form>}
-function UomForm({error,save}:any){const [v,setV]=useState<any>({dimension:"COUNT"});return <Form error={error} onSubmit={(e:any)=>{e.preventDefault();save(v)}}><Field label="Code" required value={v.code||""} onChange={(e:any)=>setV({...v,code:e.target.value})}/><Field label="Name" required value={v.name||""} onChange={(e:any)=>setV({...v,name:e.target.value})}/><Select label="Dimension" value={v.dimension} onChange={e=>setV({...v,dimension:e.target.value})}>{["COUNT","WEIGHT","VOLUME","LENGTH","TIME"].map(x=><option key={x}>{x}</option>)}</Select></Form>}
-function RouteForm({masters,error,save}:any){const [v,setV]=useState<any>({});return <Form error={error} onSubmit={(e:any)=>{e.preventDefault();save({...v,destinationCity:v.destinationCity,transitHours:Number(v.transitHours),estimatedCost:Number(v.estimatedCost||0)})}}><Select label="Warehouse" required value={v.warehouseId||""} onChange={e=>setV({...v,warehouseId:e.target.value})}><option value="">Select warehouse</option>{(masters.warehouses||[]).map((x:any)=><option key={x.id} value={x.id}>{x.name}</option>)}</Select><Field label="Destination city" required value={v.destinationCity||v.destination_key||""} onChange={(e:any)=>setV({...v,destinationCity:e.target.value})}/><Field label="Transit hours" type="number" min="1" required value={v.transitHours||""} onChange={(e:any)=>setV({...v,transitHours:e.target.value})}/><Field label="Estimated cost" type="number" min="0" value={v.estimatedCost||""} onChange={(e:any)=>setV({...v,estimatedCost:e.target.value})}/></Form>}
+function Field({
+  label,
+  ...p
+}: { label: string } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className="block text-sm font-medium">
+      {label}
+      <input className={`${field} mt-1`} {...p} />
+    </label>
+  );
+}
+function Select({
+  label,
+  children,
+  ...p
+}: { label: string; children: any } & SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <label className="block text-sm font-medium">
+      {label}
+      <select className={`${field} mt-1 bg-white`} {...p}>
+        {children}
+      </select>
+    </label>
+  );
+}
+function Form({ error, submit = "Save", children, onSubmit }: any) {
+  return (
+    <form className="space-y-4" onSubmit={onSubmit}>
+      {error && (
+        <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      {children}
+      <button className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">
+        {submit}
+      </button>
+    </form>
+  );
+}
+function Add({ children, onClick }: any) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white"
+    >
+      <Plus size={15} />
+      {children}
+    </button>
+  );
+}
+function List({
+  title,
+  action,
+  headers,
+  children,
+  columns,
+  minWidth = "min-w-[620px]",
+}: any) {
+  return (
+    <div className="panel overflow-x-auto">
+      <div className="flex items-center justify-between p-5">
+        <h3 className="font-semibold">{title}</h3>
+        {action}
+      </div>
+      <div
+        className={`grid ${minWidth} bg-slate-50 px-5 py-3 text-xs uppercase tracking-wide text-slate-400`}
+        style={{
+          gridTemplateColumns:
+            columns || `repeat(${headers.length}, minmax(0, 1fr))`,
+        }}
+      >
+        {headers.map((h: string) => (
+          <span key={h}>{h}</span>
+        ))}
+      </div>
+      {children}
+    </div>
+  );
+}
+function Metric({ label, value, green }: any) {
+  return (
+    <div className="panel p-5">
+      <div className="text-sm text-slate-500">{label}</div>
+      <div
+        className={`mt-2 text-3xl font-semibold ${green ? "text-emerald-700" : ""}`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+function StockDetail({ value }: any) {
+  return (
+    <div>
+      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Metric label="Physical" value={value?.physical || 0} />
+        <Metric label="Blocked" value={value?.blocked || 0} />
+        <Metric label="In transit" value={value?.inTransit || 0} />
+        <Metric label="Threshold" value={value?.threshold || 0} />
+        <Metric label="Allocatable" value={value?.allocatable || 0} green />
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-slate-100">
+        <div className="grid min-w-[800px] grid-cols-6 bg-slate-50 px-4 py-3 text-xs uppercase tracking-wide text-slate-400">
+          <span>Warehouse</span>
+          <span>Physical</span>
+          <span>Blocked</span>
+          <span>In transit</span>
+          <span>Threshold</span>
+          <span>Allocatable</span>
+        </div>
+        {(value?.warehouses || []).map((r: any) => (
+          <div
+            key={r.id}
+            className="grid min-w-[800px] grid-cols-6 border-t border-slate-50 px-4 py-4 text-sm"
+          >
+            <span className="font-medium">
+              {r.warehouse?.name || "Unknown warehouse"}
+            </span>
+            <span>{r.physical}</span>
+            <span>{r.blocked}</span>
+            <span>{r.inTransit || 0}</span>
+            <span>{r.threshold || 0}</span>
+            <span
+              className={
+                r.allocatable === 0
+                  ? "font-semibold text-amber-700"
+                  : "font-semibold text-emerald-700"
+              }
+            >
+              {r.allocatable}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function InventoryWorkspace({
+  rows,
+  masters,
+  transactions = [],
+  onSave,
+  onRefresh,
+}: Props) {
+  const [tab, setTab] = useState("Stock"),
+    [modal, setModal] = useState<string | null>(null),
+    [edit, setEdit] = useState<any>(null),
+    [error, setError] = useState(""),
+    [search, setSearch] = useState(""),
+    [expandedSkus, setExpandedSkus] = useState<Record<string, boolean>>({}),
+    [stockEditId, setStockEditId] = useState<string | null>(null),
+    [stockDraft, setStockDraft] = useState<any>({}),
+    [thresholdEditId, setThresholdEditId] = useState<string | null>(null),
+    [thresholdDraft, setThresholdDraft] = useState<any>({}),
+    [skuEditId, setSkuEditId] = useState<string | null>(null),
+    [skuDraft, setSkuDraft] = useState<any>({});
+  const run = async (path: string, body: any) => {
+    try {
+      setError("");
+      await onSave(path, body);
+      setModal(null);
+      setEdit(null);
+      await onRefresh();
+      return true;
+    } catch (e: any) {
+      setError(e.message);
+      return false;
+    }
+  };
+  const filtered = useMemo(
+    () =>
+      rows.filter((r) =>
+        `${r.sku?.code} ${r.sku?.name} ${r.warehouse?.name}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+      ),
+    [rows, search],
+  );
+  const channelIdentifiers = (masters.itemIdentifiers || []).filter(
+    (x: any) => x.identifier_type === "CHANNEL_SKU",
+  );
+  const globalIdentifiers = (masters.itemIdentifiers || []).filter(
+    (x: any) => x.identifier_type !== "CHANNEL_SKU",
+  );
+  const channelName = (id: string) =>
+    (masters.platforms || []).find((x: any) => x.id === id)?.name || id;
+  const activePlatforms = (masters.platforms || []).filter(
+    (x: any) => x.active !== false,
+  );
+  const activeWarehouses = (masters.warehouses || []).filter(
+    (x: any) => x.active !== false,
+  );
+  const channelColumns = activePlatforms.filter((x: any) =>
+    channelIdentifiers.some((i: any) => i.channel_id === x.id),
+  );
+  const channelValue = (skuId: string, channelId: string) =>
+    channelIdentifiers
+      .filter(
+        (x: any) =>
+          x.item_id === skuId &&
+          x.channel_id === channelId &&
+          x.active !== false,
+      )
+      .map((x: any) => x.value)
+      .join(", ");
+  const productCodes = (skuId: string) =>
+    globalIdentifiers
+      .filter((x: any) => x.item_id === skuId && x.active !== false)
+      .map((x: any) => `${x.identifier_type}: ${x.value}`)
+      .join(" · ");
+  const total = filtered.reduce(
+    (a, r) => ({
+      physical: a.physical + r.physical,
+      blocked: a.blocked + r.blocked,
+      inTransit: a.inTransit + Number(r.inTransit || 0),
+      allocatable: a.allocatable + r.allocatable,
+      threshold: a.threshold + Number(r.threshold || 0),
+    }),
+    { physical: 0, blocked: 0, inTransit: 0, allocatable: 0, threshold: 0 },
+  );
+  const skuStock = useMemo(
+    () =>
+      Object.values(
+        filtered.reduce(
+          (acc: any, r: any) => {
+            const id = r.skuId || r.item_id || r.sku?.id;
+            if (!id) return acc;
+            const current = acc[id] || {
+              id,
+              sku: r.sku,
+              physical: 0,
+              blocked: 0,
+              inTransit: 0,
+              allocatable: 0,
+              threshold: 0,
+              warehouses: [],
+            };
+            current.physical += Number(r.physical || 0);
+            current.blocked += Number(r.blocked || 0);
+            current.inTransit += Number(r.inTransit || 0);
+            current.allocatable += Number(r.allocatable || 0);
+            current.threshold += Number(r.threshold || 0);
+            current.warehouses.push(r);
+            acc[id] = current;
+            return acc;
+          },
+          {} as Record<string, any>,
+        ),
+      ),
+    [filtered],
+  );
+  const open = (name: string, value?: any) => {
+    setError("");
+    setEdit(value || null);
+    setModal(name);
+  };
+  const startStockEdit = (value: any) => {
+    setError("");
+    setStockEditId(value.id);
+    setStockDraft({
+      skuId: value.skuId || value.sku?.id,
+      warehouseId:
+        value.warehouses?.[0]?.warehouseId ||
+        value.warehouses?.[0]?.warehouse_id ||
+        value.warehouses?.[0]?.warehouse?.id,
+      quantity: "",
+      direction: "INCREASE",
+      reason: "",
+    });
+  };
+  const startSkuEdit = (value: any) => {
+    setError("");
+    setSkuEditId(value.id);
+    setSkuDraft({
+      code: value.code || "",
+      name: value.name || "",
+      itemClass: value.item_class || "FG",
+      uomId: value.base_uom_id || "",
+    });
+  };
+  const startThresholdEdit = (row: any, skuId: string) => {
+    setError("");
+    setThresholdEditId(row.id);
+    setThresholdDraft({
+      warehouseId: row.warehouseId || row.site_id,
+      skuId,
+      threshold: row.threshold ?? 0,
+    });
+  };
+  return (
+    <>
+      <div className="mb-7 flex items-end justify-between">
+        <div>
+          <p className="text-sm text-slate-500">Stock and master data</p>
+          <h2 className="mt-2 text-3xl font-semibold">Inventory</h2>
+        </div>
+        {tab === "Stock" && (
+          <Add onClick={() => open("stock")}>Adjust stock</Add>
+        )}
+      </div>
+      <div className="mb-5 flex gap-2 overflow-x-auto border-b border-slate-200">
+        {tabs.map((x) => (
+          <button
+            key={x}
+            onClick={() => setTab(x)}
+            className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold ${tab === x ? "border-emerald-600 text-emerald-700" : "border-transparent text-slate-500"}`}
+          >
+            {x}
+          </button>
+        ))}
+      </div>
+      {tab === "Stock" && (
+        <>
+          <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+            <Metric label="Physical" value={total.physical} />
+            <Metric label="Blocked" value={total.blocked} />
+            <Metric label="In transit" value={total.inTransit} />
+            <Metric label="Threshold" value={total.threshold} />
+            <Metric label="Allocatable" value={total.allocatable} green />
+          </div>
+          <List
+            title="SKU stock"
+            action={
+              <div className="flex gap-3">
+                <input
+                  className={field}
+                  placeholder="Search SKU"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                <button
+                  onClick={() => open("history")}
+                  className="flex items-center gap-2 text-sm font-semibold text-emerald-700"
+                >
+                  <History size={16} />
+                  History
+                </button>
+              </div>
+            }
+            headers={[
+              "SKU",
+              "Warehouses",
+              "Physical",
+              "Blocked",
+              "In transit",
+              "Threshold",
+              "Allocatable",
+            ]}
+            columns="1.4fr repeat(6,minmax(110px,1fr))"
+            minWidth="min-w-[900px]"
+          >
+            {skuStock.map((r: any) => {
+              const expanded = Boolean(expandedSkus[r.id]);
+              const editing = stockEditId === r.id;
+              return (
+                <div key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedSkus((current) => ({
+                        ...current,
+                        [r.id]: !current[r.id],
+                      }))
+                    }
+                    className="grid w-full min-w-[900px] cursor-pointer grid-cols-[1.4fr_repeat(6,minmax(110px,1fr))] border-t border-slate-50 px-5 py-4 text-left text-sm hover:bg-slate-50"
+                  >
+                    <div>
+                      <b>{r.sku?.code || r.id}</b>
+                      <div className="text-xs text-slate-400">
+                        {r.sku?.name || "Unknown SKU"}
+                      </div>
+                      <div className="mt-1 text-xs font-semibold text-emerald-700">
+                        {expanded
+                          ? "Hide warehouse details"
+                          : "View warehouse details"}
+                      </div>
+                    </div>
+                    <span>{r.warehouses.length}</span>
+                    <span>{r.physical}</span>
+                    <span>{r.blocked}</span>
+                    <span>{r.inTransit}</span>
+                    <span>{r.threshold}</span>
+                    <span
+                      className={
+                        r.allocatable === 0
+                          ? "font-semibold text-amber-700"
+                          : "font-semibold text-emerald-700"
+                      }
+                    >
+                      {r.allocatable === 0 && (
+                        <AlertTriangle size={13} className="mr-1 inline" />
+                      )}
+                      {r.allocatable}
+                    </span>
+                  </button>
+                  {expanded && (
+                    <div className="border-t border-emerald-100 bg-emerald-50/30 px-5 py-6">
+                      <div className="mb-4 flex items-center justify-between">
+                        <div className="text-sm font-semibold">
+                          Warehouse details
+                        </div>
+                        {!editing && (
+                          <button
+                            onClick={() => startStockEdit(r)}
+                            className="text-sm font-semibold text-emerald-700"
+                          >
+                            Edit stock
+                          </button>
+                        )}
+                      </div>
+                      {editing ? (
+                        <form
+                          className="mb-5 rounded-xl border border-emerald-200 bg-white p-4"
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            if (
+                              await run("/api/inventory/adjust", {
+                                ...stockDraft,
+                                quantity: Number(stockDraft.quantity),
+                              })
+                            )
+                              setStockEditId(null);
+                          }}
+                        >
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <Select
+                              label="Warehouse"
+                              required
+                              value={stockDraft.warehouseId || ""}
+                              onChange={(e) =>
+                                setStockDraft({
+                                  ...stockDraft,
+                                  warehouseId: e.target.value,
+                                })
+                              }
+                            >
+                              <option value="">Select warehouse</option>
+                              {(masters.warehouses || []).map((x: any) => (
+                                <option key={x.id} value={x.id}>
+                                  {x.name}
+                                </option>
+                              ))}
+                            </Select>
+                            <Select
+                              label="Transaction"
+                              required
+                              value={stockDraft.direction || "INCREASE"}
+                              onChange={(e) =>
+                                setStockDraft({
+                                  ...stockDraft,
+                                  direction: e.target.value,
+                                })
+                              }
+                            >
+                              <option value="INCREASE">Increase stock</option>
+                              <option value="DECREASE">Decrease stock</option>
+                            </Select>
+                            <Field
+                              label="Quantity"
+                              type="number"
+                              min="0.001"
+                              step="any"
+                              required
+                              value={stockDraft.quantity ?? ""}
+                              onChange={(e) =>
+                                setStockDraft({
+                                  ...stockDraft,
+                                  quantity: e.target.value,
+                                })
+                              }
+                            />
+                            <Field
+                              label="Reason"
+                              required
+                              value={stockDraft.reason || ""}
+                              onChange={(e) =>
+                                setStockDraft({
+                                  ...stockDraft,
+                                  reason: e.target.value,
+                                })
+                              }
+                            />
+                          </div>
+                          <div className="mt-4 flex gap-2">
+                            <button
+                              type="submit"
+                              className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+                            >
+                              Post inventory transaction
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setStockEditId(null)}
+                              className="rounded-lg border px-4 py-2 text-sm font-semibold"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : null}
+                      <div className="space-y-3">
+                        {r.warehouses.map((row: any) => (
+                          <div
+                            key={row.id}
+                            className="rounded-xl border border-white bg-white p-4"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <b>
+                                  {row.warehouse?.name || "Unknown warehouse"}
+                                </b>
+                                <div className="text-xs text-slate-500">
+                                  Physical {row.physical} · Blocked{" "}
+                                  {row.blocked} · In transit{" "}
+                                  {row.inTransit || 0} · Threshold{" "}
+                                  {row.threshold || 0} · Allocatable{" "}
+                                  {row.allocatable}
+                                </div>
+                              </div>
+                              {thresholdEditId !== row.id && (
+                                <button
+                                  onClick={() => startThresholdEdit(row, r.id)}
+                                  className="text-sm font-semibold text-emerald-700"
+                                >
+                                  Edit threshold
+                                </button>
+                              )}
+                            </div>
+                            {thresholdEditId === row.id && (
+                              <form
+                                className="mt-3 flex flex-wrap items-end gap-3"
+                                onSubmit={async (e) => {
+                                  e.preventDefault();
+                                  if (
+                                    await run("/api/inventory/policies", {
+                                      ...thresholdDraft,
+                                      threshold: Number(
+                                        thresholdDraft.threshold,
+                                      ),
+                                    })
+                                  )
+                                    setThresholdEditId(null);
+                                }}
+                              >
+                                <Field
+                                  label="Protected threshold"
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  required
+                                  value={thresholdDraft.threshold ?? 0}
+                                  onChange={(e) =>
+                                    setThresholdDraft({
+                                      ...thresholdDraft,
+                                      threshold: e.target.value,
+                                    })
+                                  }
+                                />
+                                <button
+                                  type="submit"
+                                  className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+                                >
+                                  Save threshold
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setThresholdEditId(null)}
+                                  className="rounded-lg border px-4 py-2 text-sm font-semibold"
+                                >
+                                  Cancel
+                                </button>
+                              </form>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </List>
+        </>
+      )}
+      {tab === "SKUs" && (
+        <List
+          title="SKUs"
+          action={<Add onClick={() => open("sku")}>Add SKU</Add>}
+          headers={["Code / title", "Class", "Base UOM", "Status", ""]}
+        >
+          {(masters.skus || []).map((x: any) => {
+            const editing = skuEditId === x.id;
+            return (
+              <div
+                key={x.id}
+                className={`border-t border-slate-50 px-5 py-4 text-sm ${editing ? "bg-emerald-50/30" : ""}`}
+              >
+                {editing ? (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-4">
+                      <Field
+                        label="SKU code"
+                        required
+                        value={skuDraft.code || ""}
+                        onChange={(e) =>
+                          setSkuDraft({ ...skuDraft, code: e.target.value })
+                        }
+                      />
+                      <Field
+                        label="Product title"
+                        required
+                        value={skuDraft.name || ""}
+                        onChange={(e) =>
+                          setSkuDraft({ ...skuDraft, name: e.target.value })
+                        }
+                      />
+                      <Select
+                        label="Item class"
+                        value={skuDraft.itemClass || "FG"}
+                        onChange={(e) =>
+                          setSkuDraft({
+                            ...skuDraft,
+                            itemClass: e.target.value,
+                          })
+                        }
+                      >
+                        {[
+                          "FG",
+                          "SFG",
+                          "RM",
+                          "PM",
+                          "CONSUMABLE",
+                          "SPARE",
+                          "KIT",
+                        ].map((v: string) => (
+                          <option key={v}>{v}</option>
+                        ))}
+                      </Select>
+                      <Select
+                        label="Base UOM"
+                        required
+                        value={skuDraft.uomId || ""}
+                        onChange={(e) =>
+                          setSkuDraft({ ...skuDraft, uomId: e.target.value })
+                        }
+                      >
+                        <option value="">Select UOM</option>
+                        {(masters.uoms || []).map((u: any) => (
+                          <option key={u.id} value={u.id}>
+                            {u.code} — {u.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        onClick={async () => {
+                          if (await run(`/api/skus/${x.id}`, { ...skuDraft }))
+                            setSkuEditId(null);
+                        }}
+                        className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+                      >
+                        Save SKU
+                      </button>
+                      <button
+                        onClick={() => setSkuEditId(null)}
+                        className="rounded-lg border px-4 py-2 text-sm font-semibold"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-[1.6fr_1fr_1fr_1fr_80px] items-center">
+                    <div>
+                      <b>{x.code}</b>
+                      <div className="text-xs text-slate-400">{x.name}</div>
+                    </div>
+                    <span>{x.item_class}</span>
+                    <span>
+                      {(masters.uoms || []).find(
+                        (u: any) => u.id === x.base_uom_id,
+                      )?.code || "—"}
+                    </span>
+                    <span>{x.lifecycle_status}</span>
+                    <button
+                      onClick={() => startSkuEdit(x)}
+                      className="text-right font-semibold text-emerald-700"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </List>
+      )}
+      {tab === "Warehouses" && (
+        <List
+          title="Warehouses"
+          action={
+            <div className="flex gap-2">
+              <button
+                onClick={() => open("location")}
+                className="rounded-lg border px-3 py-2 text-sm font-semibold"
+              >
+                Add location
+              </button>
+              <Add onClick={() => open("warehouse")}>Add warehouse</Add>
+            </div>
+          }
+          headers={["Warehouse", "City / state", "Locations", "Status", ""]}
+        >
+          {(masters.warehouses || []).map((x: any) => (
+            <div
+              key={x.id}
+              className="grid grid-cols-[1.5fr_1fr_1fr_1fr_80px] border-t border-slate-50 px-5 py-4 text-sm"
+            >
+              <div>
+                <b>{x.name}</b>
+                <div className="text-xs text-slate-400">{x.code}</div>
+              </div>
+              <span>{[x.city, x.state].filter(Boolean).join(", ") || "—"}</span>
+              <span>
+                {
+                  (masters.locations || []).filter(
+                    (l: any) => l.site_id === x.id,
+                  ).length
+                }
+              </span>
+              <span>{x.active ? "Active" : "Inactive"}</span>
+              <button
+                onClick={() => open("warehouse", x)}
+                className="text-right font-semibold text-emerald-700"
+              >
+                Edit
+              </button>
+            </div>
+          ))}
+        </List>
+      )}
+      {tab === "Mappings" && (
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-slate-100 bg-white p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="font-semibold">
+                  Product and channel SKU mappings
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  One product can have a different platform SKU on each channel.
+                  These codes identify the same product on Amazon, Flipkart,
+                  Blinkit, and other channels.
+                </p>
+              </div>
+              <Add onClick={() => open("mapping")}>Add channel SKU</Add>
+            </div>
+            <div className="mt-5 overflow-x-auto">
+              <div className="min-w-[760px]">
+                <div
+                  className="grid border-y border-slate-100 bg-slate-50 px-4 py-3 text-xs uppercase tracking-wide text-slate-400"
+                  style={{
+                    gridTemplateColumns: `1.35fr 1fr repeat(${Math.max(channelColumns.length, 1)}, minmax(150px,1fr))`,
+                  }}
+                >
+                  <span>Product</span>
+                  <span>Global product codes</span>
+                  {channelColumns.length ? (
+                    channelColumns.map((x: any) => (
+                      <span key={x.id}>{x.name}</span>
+                    ))
+                  ) : (
+                    <span>Platform SKU</span>
+                  )}
+                </div>
+                {(masters.skus || []).map((x: any) => (
+                  <div
+                    key={x.id}
+                    className="grid items-center border-b border-slate-50 px-4 py-4 text-sm"
+                    style={{
+                      gridTemplateColumns: `1.35fr 1fr repeat(${Math.max(channelColumns.length, 1)}, minmax(150px,1fr))`,
+                    }}
+                  >
+                    <div>
+                      <b>{x.name}</b>
+                      <div className="mt-1 text-xs text-slate-400">
+                        Internal SKU: {x.code}
+                      </div>
+                    </div>
+                    <span className="text-xs text-slate-500">
+                      {productCodes(x.id) || "—"}
+                    </span>
+                    {channelColumns.length ? (
+                      channelColumns.map((c: any) => (
+                        <span key={c.id} className="font-medium">
+                          {channelValue(x.id, c.id) || (
+                            <span className="font-normal text-slate-400">
+                              Not mapped
+                            </span>
+                          )}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-400">No channel codes</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <List
+            title="Fallback destination mappings"
+            action={
+              <button
+                onClick={() => open("mapping")}
+                className="rounded-lg border px-3 py-2 text-sm font-semibold"
+              >
+                Add fallback
+              </button>
+            }
+            headers={["Channel", "Destination", "Source warehouse", "Status"]}
+          >
+            {(masters.mappings || []).map((x: any) => (
+              <div
+                key={x.id}
+                className="grid grid-cols-4 border-t border-slate-50 px-5 py-4 text-sm"
+              >
+                <span>{channelName(x.channel_id)}</span>
+                <span>
+                  <b>{x.destination_key || x.destination_name}</b>
+                  <div className="text-xs text-slate-400">
+                    {x.destination_name || ""}
+                  </div>
+                </span>
+                <span>
+                  {(masters.warehouses || []).find(
+                    (w: any) => w.id === x.source_site_id,
+                  )?.name ||
+                    x.source_site_id ||
+                    "—"}
+                </span>
+                <span>{x.active !== false ? "Active" : "Inactive"}</span>
+              </div>
+            ))}
+          </List>
+          <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+            Source and destination warehouses normally come from the PO or
+            appointment. Use this fallback only when the document does not
+            provide a clear source or destination.
+          </div>
+        </div>
+      )}
+      {tab === "UOMs & routes" && (
+        <div className="grid gap-5 lg:grid-cols-2">
+          <List
+            title="Units of measure"
+            action={<Add onClick={() => open("uom")}>Add UOM</Add>}
+            headers={["Code", "Name", "Dimension"]}
+          >
+            {(masters.uoms || []).map((x: any) => (
+              <div
+                key={x.id}
+                className="grid grid-cols-3 border-t border-slate-50 px-5 py-4 text-sm"
+              >
+                <b>{x.code}</b>
+                <span>{x.name}</span>
+                <span>{x.dimension}</span>
+              </div>
+            ))}
+          </List>
+          <List
+            title="Route estimates"
+            action={<Add onClick={() => open("route")}>Add route</Add>}
+            headers={["Warehouse", "Destination city", "Transit"]}
+          >
+            {(masters.routes || []).map((x: any) => (
+              <div
+                key={x.id}
+                className="grid grid-cols-3 border-t border-slate-50 px-5 py-4 text-sm"
+              >
+                <span>
+                  {(masters.warehouses || []).find(
+                    (w: any) => w.id === x.source_site_id,
+                  )?.name || x.source_site_id}
+                </span>
+                <span>{x.destination_city || x.destination_key}</span>
+                <span>{x.transit_hours} h</span>
+              </div>
+            ))}
+          </List>
+        </div>
+      )}
+      {modal === "stock" && (
+        <Modal title="Post inventory transaction" close={() => setModal(null)}>
+          <StockForm
+            masters={masters}
+            error={error}
+            save={(b: any) => run("/api/inventory/adjust", b)}
+          />
+        </Modal>
+      )}
+      {modal === "sku" && (
+        <Modal
+          title={edit ? "Edit SKU" : "Add SKU"}
+          close={() => setModal(null)}
+        >
+          <SkuForm
+            value={edit}
+            masters={masters}
+            error={error}
+            save={(b: any) =>
+              run(edit ? `/api/skus/${edit.id}` : "/api/skus", b)
+            }
+          />
+        </Modal>
+      )}
+      {modal === "warehouse" && (
+        <Modal
+          title={edit ? "Edit warehouse" : "Add warehouse"}
+          close={() => setModal(null)}
+        >
+          <WarehouseForm
+            value={edit}
+            error={error}
+            save={(b: any) =>
+              run(edit ? `/api/warehouses/${edit.id}` : "/api/warehouses", b)
+            }
+          />
+        </Modal>
+      )}
+      {modal === "location" && (
+        <Modal title="Add warehouse location" close={() => setModal(null)}>
+          <LocationForm
+            masters={masters}
+            error={error}
+            save={(b: any) => run("/api/locations", b)}
+          />
+        </Modal>
+      )}
+      {modal === "mapping" && (
+        <Modal title="Add channel mapping" close={() => setModal(null)}>
+          <MappingForm
+            masters={masters}
+            error={error}
+            save={(b: any) => run("/api/mappings", b)}
+          />
+        </Modal>
+      )}
+      {modal === "uom" && (
+        <Modal title="Add unit of measure" close={() => setModal(null)}>
+          <UomForm error={error} save={(b: any) => run("/api/uoms", b)} />
+        </Modal>
+      )}
+      {modal === "route" && (
+        <Modal title="Add route estimate" close={() => setModal(null)}>
+          <RouteForm
+            masters={masters}
+            error={error}
+            save={(b: any) => run("/api/routes", b)}
+          />
+        </Modal>
+      )}
+      {modal === "history" && (
+        <Modal
+          title={edit?.sku ? "SKU warehouse stock" : "Stock history"}
+          close={() => setModal(null)}
+        >
+          {edit?.sku ? (
+            <StockDetail value={edit} />
+          ) : (
+            <div className="max-h-80 space-y-3 overflow-auto">
+              {transactions.length === 0 && (
+                <div className="py-5 text-sm text-slate-500">
+                  No stock transactions found.
+                </div>
+              )}
+              {transactions.map((x: any) => (
+                <div
+                  key={x.id}
+                  className="rounded-lg border border-slate-100 p-3 text-sm"
+                >
+                  <div className="flex justify-between font-semibold">
+                    <span>{x.transaction_type}</span>
+                    <span
+                      className={
+                        x.status === "REVERSED"
+                          ? "text-red-600"
+                          : "text-emerald-700"
+                      }
+                    >
+                      {x.status}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {x.reason || "No reason"} ·{" "}
+                    {new Date(x.created_at).toLocaleString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+    </>
+  );
+}
+function StockForm({ masters, error, save }: any) {
+  const [v, setV] = useState<any>({ direction: "INCREASE" });
+  return (
+    <Form
+      error={error}
+      onSubmit={(e: any) => {
+        e.preventDefault();
+        save({ ...v, quantity: Number(v.quantity) });
+      }}
+    >
+      <Select
+        label="Transaction"
+        required
+        value={v.direction || "INCREASE"}
+        onChange={(e) => setV({ ...v, direction: e.target.value })}
+      >
+        <option value="INCREASE">Increase stock</option>
+        <option value="DECREASE">Decrease stock</option>
+      </Select>
+      <Select
+        label="SKU"
+        required
+        value={v.skuId || ""}
+        onChange={(e) => setV({ ...v, skuId: e.target.value })}
+      >
+        <option value="">Select SKU</option>
+        {(masters.skus || []).map((x: any) => (
+          <option key={x.id} value={x.id}>
+            {x.code} — {x.name}
+          </option>
+        ))}
+      </Select>
+      <Select
+        label="Warehouse"
+        required
+        value={v.warehouseId || ""}
+        onChange={(e) => setV({ ...v, warehouseId: e.target.value })}
+      >
+        <option value="">Select warehouse</option>
+        {(masters.warehouses || []).map((x: any) => (
+          <option key={x.id} value={x.id}>
+            {x.name}
+          </option>
+        ))}
+      </Select>
+      <Select
+        label="Location"
+        value={v.locationId || ""}
+        onChange={(e) => setV({ ...v, locationId: e.target.value })}
+      >
+        <option value="">Default location</option>
+        {(masters.locations || [])
+          .filter((x: any) => x.site_id === v.warehouseId)
+          .map((x: any) => (
+            <option key={x.id} value={x.id}>
+              {x.code}
+            </option>
+          ))}
+      </Select>
+      <Field
+        label="Quantity"
+        type="number"
+        min="0.001"
+        step="any"
+        required
+        value={v.quantity ?? ""}
+        onChange={(e: any) => setV({ ...v, quantity: e.target.value })}
+      />
+      <Field
+        label="Reason"
+        required
+        value={v.reason || ""}
+        onChange={(e: any) => setV({ ...v, reason: e.target.value })}
+      />
+    </Form>
+  );
+}
+function SkuForm({ value, masters, error, save }: any) {
+  const [v, setV] = useState<any>(value || {});
+  return (
+    <Form
+      error={error}
+      onSubmit={(e: any) => {
+        e.preventDefault();
+        save({ ...v, uomId: v.uomId || v.base_uom_id });
+      }}
+    >
+      <Field
+        label="SKU code"
+        required
+        value={v.code || ""}
+        onChange={(e: any) => setV({ ...v, code: e.target.value })}
+      />
+      <Field
+        label="Product title"
+        required
+        value={v.name || ""}
+        onChange={(e: any) => setV({ ...v, name: e.target.value })}
+      />
+      <Select
+        label="Item class"
+        value={v.itemClass || v.item_class || "FG"}
+        onChange={(e) => setV({ ...v, itemClass: e.target.value })}
+      >
+        {["FG", "SFG", "RM", "PM", "CONSUMABLE", "SPARE", "KIT"].map((x) => (
+          <option key={x}>{x}</option>
+        ))}
+      </Select>
+      <Select
+        label="Base UOM"
+        required
+        value={v.uomId || v.base_uom_id || ""}
+        onChange={(e) => setV({ ...v, uomId: e.target.value })}
+      >
+        <option value="">Select UOM</option>
+        {(masters.uoms || []).map((x: any) => (
+          <option key={x.id} value={x.id}>
+            {x.code} — {x.name}
+          </option>
+        ))}
+      </Select>
+    </Form>
+  );
+}
+function WarehouseForm({ value, error, save }: any) {
+  const [v, setV] = useState<any>(value || {});
+  return (
+    <Form
+      error={error}
+      onSubmit={(e: any) => {
+        e.preventDefault();
+        save(v);
+      }}
+    >
+      <Field
+        label="Warehouse code"
+        required
+        value={v.code || ""}
+        onChange={(e: any) => setV({ ...v, code: e.target.value })}
+      />
+      <Field
+        label="Warehouse name"
+        required
+        value={v.name || ""}
+        onChange={(e: any) => setV({ ...v, name: e.target.value })}
+      />
+      <Field
+        label="City"
+        required
+        value={v.city || ""}
+        onChange={(e: any) => setV({ ...v, city: e.target.value })}
+      />
+      <Field
+        label="State"
+        value={v.state || ""}
+        onChange={(e: any) => setV({ ...v, state: e.target.value })}
+      />
+      <Field
+        label="Address line 1"
+        value={v.addressLine1 || v.address_line1 || ""}
+        onChange={(e: any) => setV({ ...v, addressLine1: e.target.value })}
+      />
+      <Field
+        label="Address line 2"
+        value={v.addressLine2 || v.address_line2 || ""}
+        onChange={(e: any) => setV({ ...v, addressLine2: e.target.value })}
+      />
+      <Field
+        label="Postal code"
+        value={v.postalCode || v.postal_code || ""}
+        onChange={(e: any) => setV({ ...v, postalCode: e.target.value })}
+      />
+    </Form>
+  );
+}
+function LocationForm({ masters, error, save }: any) {
+  const [v, setV] = useState<any>({});
+  return (
+    <Form
+      error={error}
+      onSubmit={(e: any) => {
+        e.preventDefault();
+        save(v);
+      }}
+    >
+      <Select
+        label="Warehouse"
+        required
+        value={v.warehouseId || ""}
+        onChange={(e) => setV({ ...v, warehouseId: e.target.value })}
+      >
+        <option value="">Select warehouse</option>
+        {(masters.warehouses || []).map((x: any) => (
+          <option key={x.id} value={x.id}>
+            {x.name}
+          </option>
+        ))}
+      </Select>
+      <Field
+        label="Location code"
+        required
+        value={v.code || ""}
+        onChange={(e: any) => setV({ ...v, code: e.target.value })}
+      />
+      <Field
+        label="Location name"
+        required
+        value={v.name || ""}
+        onChange={(e: any) => setV({ ...v, name: e.target.value })}
+      />
+      <Select
+        label="Type"
+        required
+        value={v.locationType || ""}
+        onChange={(e) => setV({ ...v, locationType: e.target.value })}
+      >
+        <option value="">Select type</option>
+        {[
+          "WAREHOUSE",
+          "ZONE",
+          "RACK",
+          "BIN",
+          "QUARANTINE",
+          "REJECTED",
+          "RETURN",
+        ].map((x) => (
+          <option key={x}>{x}</option>
+        ))}
+      </Select>
+    </Form>
+  );
+}
+function MappingForm({ masters, error, save }: any) {
+  const [v, setV] = useState<any>({ mappingType: "CHANNEL_SKU" });
+  return (
+    <Form
+      error={error}
+      onSubmit={(e: any) => {
+        e.preventDefault();
+        save(v);
+      }}
+    >
+      <Select
+        label="Mapping type"
+        value={v.mappingType}
+        onChange={(e) => setV({ ...v, mappingType: e.target.value })}
+      >
+        <option value="CHANNEL_SKU">Channel SKU</option>
+        <option value="DESTINATION">Destination</option>
+      </Select>
+      <Select
+        label="Channel"
+        required
+        value={v.channelId || ""}
+        onChange={(e) => setV({ ...v, channelId: e.target.value })}
+      >
+        <option value="">Select channel</option>
+        {(masters.platforms || []).map((x: any) => (
+          <option key={x.id} value={x.id}>
+            {x.name}
+          </option>
+        ))}
+      </Select>
+      {v.mappingType === "CHANNEL_SKU" ? (
+        <>
+          <Select
+            label="Internal SKU"
+            required
+            value={v.skuId || ""}
+            onChange={(e) => setV({ ...v, skuId: e.target.value })}
+          >
+            <option value="">Select SKU</option>
+            {(masters.skus || []).map((x: any) => (
+              <option key={x.id} value={x.id}>
+                {x.code}
+              </option>
+            ))}
+          </Select>
+          <Field
+            label="External product code"
+            required
+            value={v.value || ""}
+            onChange={(e: any) => setV({ ...v, value: e.target.value })}
+          />
+        </>
+      ) : (
+        <>
+          <Field
+            label="Destination key"
+            required
+            value={v.destinationKey || ""}
+            onChange={(e: any) =>
+              setV({ ...v, destinationKey: e.target.value })
+            }
+          />
+          <Field
+            label="Destination name"
+            required
+            value={v.destinationName || ""}
+            onChange={(e: any) =>
+              setV({ ...v, destinationName: e.target.value })
+            }
+          />
+          <Select
+            label="Warehouse"
+            required
+            value={v.warehouseId || ""}
+            onChange={(e) => setV({ ...v, warehouseId: e.target.value })}
+          >
+            <option value="">Select warehouse</option>
+            {(masters.warehouses || []).map((x: any) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </Select>
+          <Select
+            label="Source location"
+            required
+            value={v.locationId || ""}
+            onChange={(e) => setV({ ...v, locationId: e.target.value })}
+          >
+            <option value="">Select location</option>
+            {(masters.locations || [])
+              .filter((x: any) => x.site_id === v.warehouseId)
+              .map((x: any) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+          </Select>
+        </>
+      )}
+    </Form>
+  );
+}
+function UomForm({ error, save }: any) {
+  const [v, setV] = useState<any>({ dimension: "COUNT" });
+  return (
+    <Form
+      error={error}
+      onSubmit={(e: any) => {
+        e.preventDefault();
+        save(v);
+      }}
+    >
+      <Field
+        label="Code"
+        required
+        value={v.code || ""}
+        onChange={(e: any) => setV({ ...v, code: e.target.value })}
+      />
+      <Field
+        label="Name"
+        required
+        value={v.name || ""}
+        onChange={(e: any) => setV({ ...v, name: e.target.value })}
+      />
+      <Select
+        label="Dimension"
+        value={v.dimension}
+        onChange={(e) => setV({ ...v, dimension: e.target.value })}
+      >
+        {["COUNT", "WEIGHT", "VOLUME", "LENGTH", "TIME"].map((x) => (
+          <option key={x}>{x}</option>
+        ))}
+      </Select>
+    </Form>
+  );
+}
+function RouteForm({ masters, error, save }: any) {
+  const [v, setV] = useState<any>({});
+  return (
+    <Form
+      error={error}
+      onSubmit={(e: any) => {
+        e.preventDefault();
+        save({
+          ...v,
+          destinationCity: v.destinationCity,
+          transitHours: Number(v.transitHours),
+          estimatedCost: Number(v.estimatedCost || 0),
+        });
+      }}
+    >
+      <Select
+        label="Warehouse"
+        required
+        value={v.warehouseId || ""}
+        onChange={(e) => setV({ ...v, warehouseId: e.target.value })}
+      >
+        <option value="">Select warehouse</option>
+        {(masters.warehouses || []).map((x: any) => (
+          <option key={x.id} value={x.id}>
+            {x.name}
+          </option>
+        ))}
+      </Select>
+      <Field
+        label="Destination city"
+        required
+        value={v.destinationCity || v.destination_key || ""}
+        onChange={(e: any) => setV({ ...v, destinationCity: e.target.value })}
+      />
+      <Field
+        label="Transit hours"
+        type="number"
+        min="1"
+        required
+        value={v.transitHours ?? ""}
+        onChange={(e: any) => setV({ ...v, transitHours: e.target.value })}
+      />
+      <Field
+        label="Estimated cost"
+        type="number"
+        min="0"
+        value={v.estimatedCost ?? ""}
+        onChange={(e: any) => setV({ ...v, estimatedCost: e.target.value })}
+      />
+    </Form>
+  );
+}

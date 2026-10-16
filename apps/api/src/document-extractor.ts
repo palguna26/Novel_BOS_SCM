@@ -284,6 +284,10 @@ export function normalizeDocument(text:string):NormalizedDocument {
   if (kind === 'APPOINTMENT' && !appointmentId) warnings.push('Appointment number was not found.');
   if (!destination && !destinationAddress) warnings.push('Destination could not be extracted.');
   if (kind === 'PURCHASE_ORDER' && lines.length === 0) warnings.push('Line items require manual review.');
+  const comparable = (value:string|null) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (sourceAddress && destinationAddress && comparable(sourceAddress) === comparable(destinationAddress)) warnings.push('Source and destination addresses are identical; confirm the document fields before accepting.');
+  if (sourceAddress && /\b(?:ship\s+to|delivery|destination|receiving|fc\s*[-:])\b/i.test(sourceAddress)) warnings.push('Source address contains destination terms; confirm source/destination assignment.');
+  if (destinationAddress && /\b(?:ship\s+from|dispatch|supplier|vendor|seller)\b/i.test(destinationAddress)) warnings.push('Destination address contains supplier/source terms; confirm source/destination assignment.');
   const checks = [platform !== 'UNKNOWN',kind !== 'UNKNOWN',!!(externalId||appointmentId),!!(destination||destinationAddress),lines.length>0];
   const confidence = Math.round((checks.filter(Boolean).length/checks.length)*100)/100;
 

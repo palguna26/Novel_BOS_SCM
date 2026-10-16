@@ -12,6 +12,7 @@ describe('IntegrationGuard', () => {
     token: process.env.SALES_INTEGRATION_TOKEN,
     company: process.env.SALES_INTEGRATION_COMPANY_ID,
     scopes: process.env.SALES_INTEGRATION_SCOPES,
+    fallback: process.env.ALLOW_USER_INTEGRATION_FALLBACK,
   };
 
   afterEach(() => {
@@ -21,6 +22,8 @@ describe('IntegrationGuard', () => {
     else process.env.SALES_INTEGRATION_COMPANY_ID = original.company;
     if (original.scopes === undefined) delete process.env.SALES_INTEGRATION_SCOPES;
     else process.env.SALES_INTEGRATION_SCOPES = original.scopes;
+    if (original.fallback === undefined) delete process.env.ALLOW_USER_INTEGRATION_FALLBACK;
+    else process.env.ALLOW_USER_INTEGRATION_FALLBACK = original.fallback;
   });
 
   it('accepts the configured UAT token and attaches tenant scopes', async () => {
@@ -61,5 +64,15 @@ describe('IntegrationGuard', () => {
 
     await expect(guard.canActivate(requestContext)).resolves.toBe(true);
     expect((requestContext.switchToHttp().getRequest() as any).integration.clientId).toBe('client-1');
+  });
+
+  it('does not accept an interactive user session as an integration credential by default', async () => {
+    delete process.env.SALES_INTEGRATION_TOKEN;
+    delete process.env.SALES_INTEGRATION_COMPANY_ID;
+    delete process.env.ALLOW_USER_INTEGRATION_FALLBACK;
+    const query: any = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: null }) };
+    const supabase = { schema: () => ({ from: () => query }), userFromToken: async () => ({ id: 'user-1', companyId: 'company-1' }) } as any;
+    const guard = new IntegrationGuard(supabase);
+    await expect(guard.canActivate(context({ authorization: 'Bearer user-token' }))).rejects.toThrow('Integration credentials are required');
   });
 });

@@ -2,6 +2,15 @@ import { describe, expect, it } from '@jest/globals';
 import { mergeDocumentFallback, normalizeDocument } from './document-extractor';
 
 describe('normalizeDocument',()=>{
+  it('warns when logistics addresses look swapped or duplicated',()=>{
+    const result=normalizeDocument(`PURCHASE ORDER
+PO: 4S2BJXYY
+Source Warehouse Address: Same Road, Bengaluru
+Destination Address: Same Road, Bengaluru
+Appointment: none`);
+    expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('identical')]));
+  });
+
   it('normalizes an Amazon appointment',()=>{
     const result=normalizeDocument(`Amazon Vendor Central
 Shipments > Appointments > 998424004985

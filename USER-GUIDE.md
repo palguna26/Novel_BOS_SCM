@@ -97,7 +97,7 @@ Before accepting, check the PO ID, destination, warehouse, SKU lines, quantities
 - Select **Accept** or **Accept PO** when the PO is correct.
 - Select **Reject** when it should not be processed and provide a reason.
 
-Acceptance starts the stock reservation gate. It does not reserve stock until the appointment gate is also complete.
+Acceptance immediately creates the stock reservation. If available stock is insufficient, the PO shows the shortage while the appointment is still pending.
 
 ## 5. PO full workspace
 
@@ -228,7 +228,7 @@ Appointments are booked outside SCM. This page records the appointment after boo
 5. Enter appointment ID, appointment time, and location.
 6. Save.
 
-The PO can reach reservation readiness when both appointment and acceptance are complete.
+The appointment enriches the already-accepted PO with appointment time, FC, and logistics details. It is not required for stock reservation, but it is required before shipment planning.
 
 ## 9. Invoices and short close
 
@@ -283,7 +283,7 @@ Some stock may already be blocked, in transit, or protected by the threshold. Ch
 
 ### Shipment cannot be planned
 
-Check that the PO has both an accepted reservation and an appointment, and that at least one line still has unplanned reserved quantity.
+Check that the PO has an accepted reservation, a matched appointment, an active source-to-destination route, and at least one line still has unplanned reserved quantity.
 
 ### Shipment quantity is rejected
 

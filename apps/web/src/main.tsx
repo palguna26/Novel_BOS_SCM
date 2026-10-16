@@ -33,6 +33,7 @@ import {
   UserRound,
   MessageCircle,
   Menu,
+  Download,
 } from "lucide-react";
 import "./index.css";
 import { Button as UiButton } from "./components/ui/button";
@@ -60,8 +61,26 @@ import {
 } from "./lib/document-upload";
 import { emptyPoFilters, filterPos, type PoFilters } from "./lib/po-search";
 const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
-type User = { id: string; name: string; email: string; role: string };
+type User = { id: string; name: string; email: string; role: string; canApprove?: boolean };
 type PO = any;
+function uniqueWarehouseId(warehouses: any[], city: string, postalCode?: string) {
+  const normalizedPostal = String(postalCode || '').replace(/\s+/g, '').toLowerCase();
+  const normalizedCity = String(city || '').trim().toLowerCase();
+  const postalMatches = normalizedPostal
+    ? warehouses.filter((warehouse: any) => String(warehouse.postal_code || warehouse.postalCode || '').replace(/\s+/g, '').toLowerCase() === normalizedPostal)
+    : [];
+  if (postalMatches.length === 1) return postalMatches[0].id;
+  if (!normalizedCity) return '';
+  const matches = warehouses.filter((warehouse: any) => String(warehouse.city || '').trim().toLowerCase() === normalizedCity);
+  return matches.length === 1 ? matches[0].id : '';
+}
+function uniqueDestinationMapping(mappings: any[], channelId: string, destination: string) {
+  const key = String(destination || '').trim().toLowerCase();
+  if (!key) return null;
+  const matches = mappings.filter((mapping: any) => mapping.active !== false && mapping.channel_id === channelId && String(mapping.destination_key || '').trim().toLowerCase() === key);
+  const sourceIds = [...new Set(matches.map((mapping: any) => mapping.source_site_id).filter(Boolean))];
+  return sourceIds.length === 1 ? matches.find((mapping: any) => mapping.source_site_id === sourceIds[0]) : null;
+}
 function storeSession(session: any) {
   localStorage.setItem("scm_token", session.accessToken);
   if (session.refreshToken) localStorage.setItem("scm_refresh_token", session.refreshToken);
@@ -219,6 +238,10 @@ function App() {
     [page, setPage] = useState("Overview"),
     [data, setData] = useState<any>({}),
     [selected, setSelected] = useState<PO | null>(null),
+    [appointmentPo, setAppointmentPo] = useState<PO | null>(null),
+    [shipmentPo, setShipmentPo] = useState<PO | null>(null),
+    [invoicePo, setInvoicePo] = useState<PO | null>(null),
+    [podSelection, setPodSelection] = useState<{ po: PO; shipmentId: string } | null>(null),
     [editingPo, setEditingPo] = useState<PO | null>(null),
     [toast, setToast] = useState(""),
     [copilotOpen, setCopilotOpen] = useState(false),
@@ -397,6 +420,7 @@ function App() {
               onSelect={setSelected}
               onAction={action}
               onRefresh={refresh}
+              canApprove={Boolean(user.canApprove)}
             />
           )}{" "}
           {page === "Inventory" && (
@@ -426,8 +450,17 @@ function App() {
           onAction={action}
           onEdit={() => setEditingPo(selected)}
           canEdit={user.role !== 'QC'}
+          canApprove={Boolean(user.canApprove)}
+          onAttachAppointment={() => setAppointmentPo(selected)}
+          onPlanShipment={() => setShipmentPo(selected)}
+          onUploadInvoice={() => setInvoicePo(selected)}
+          onConfirmPod={(shipmentId) => setPodSelection({ po: selected, shipmentId })}
         />
       )}
+      {appointmentPo && <DocumentWorkflowModal apiBase={API} mode="appointment" po={appointmentPo} onClose={() => setAppointmentPo(null)} onSaved={() => { setAppointmentPo(null); refresh(); }} />}
+      {shipmentPo && <ShipmentPlanModal pos={[shipmentPo]} initialPoId={shipmentPo.id} onClose={() => setShipmentPo(null)} onAction={action} />}
+      {invoicePo && <DocumentWorkflowModal apiBase={API} mode="invoice" po={invoicePo} onClose={() => setInvoicePo(null)} onSaved={() => { setInvoicePo(null); refresh(); }} />}
+      {podSelection && <DocumentWorkflowModal apiBase={API} mode="pod" po={podSelection.po} shipmentId={podSelection.shipmentId} onClose={() => setPodSelection(null)} onSaved={() => { setPodSelection(null); refresh(); }} />}
       {editingPo && <EditPoModal po={editingPo} masters={data.masters || {}} onClose={() => setEditingPo(null)} onAction={action} onSaved={() => { setEditingPo(null); setSelected(null); }} />}
       {copilotOpen && <CopilotPanel api={api} page={page} context={selected ? { selectedPo: selected.externalId } : undefined} onClose={() => setCopilotOpen(false)} />}
     </div>
@@ -613,18 +646,146 @@ function Section({
     </div>
   );
 }
+async function exportPurchaseOrders(pos: PO[]) {
+  const ExcelJS = (await import("exceljs")).default;
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "Novel SCM";
+  workbook.created = new Date();
+
+  const poSheet = workbook.addWorksheet("Purchase orders");
+  poSheet.columns = [
+    { header: "PO number", key: "poNumber", width: 20 },
+    { header: "Vendor / customer", key: "vendor", width: 28 },
+    { header: "Platform", key: "platform", width: 18 },
+    { header: "PO date", key: "poDate", width: 14 },
+    { header: "Deadline", key: "deadline", width: 22 },
+    { header: "Source warehouse", key: "sourceWarehouse", width: 24 },
+    { header: "Source location code", key: "sourceLocation", width: 20 },
+    { header: "Destination facility", key: "destinationFacility", width: 28 },
+    { header: "FC code", key: "fcCode", width: 16 },
+    { header: "FC city", key: "fcCity", width: 18 },
+    { header: "Destination address", key: "destinationAddress", width: 40 },
+    { header: "Lead time (hours)", key: "leadTime", width: 18 },
+    { header: "Status", key: "status", width: 24 },
+    { header: "Appointment status", key: "appointmentStatus", width: 22 },
+    { header: "Appointment date", key: "appointmentDate", width: 22 },
+    { header: "Reserved quantity", key: "reserved", width: 18 },
+    { header: "Dispatched quantity", key: "dispatched", width: 20 },
+    { header: "Delivered quantity", key: "delivered", width: 18 },
+    { header: "Shortage quantity", key: "shortage", width: 18 },
+    { header: "Shipment count", key: "shipments", width: 16 },
+    { header: "Invoice number", key: "invoice", width: 20 },
+  ];
+  for (const po of pos) {
+    const lines = po.lines || [];
+    const shipments = po.shipments || [];
+    poSheet.addRow({
+      poNumber: po.externalId || po.external_id,
+      vendor: po.customer || po.customer_name || "",
+      platform: po.platform?.name || po.platform?.code,
+      poDate: po.poDate || po.po_date || "",
+      deadline: po.deadline || "",
+      sourceWarehouse: po.warehouse?.name || po.warehouse?.code || "",
+      sourceLocation: po.warehouse?.code || "",
+      destinationFacility: po.destinationFacility?.name || po.destinationFacility?.code || "",
+      fcCode: po.destinationFacility?.fc_code || po.destinationFacility?.fcCode || "",
+      fcCity: po.destinationCity || po.destinationFacility?.city || "",
+      destinationAddress: po.destinationAddress || po.destination || "",
+      leadTime: po.route?.transit_hours || "",
+      status: po.status || "",
+      appointmentStatus: po.appointment?.status || "Pending",
+      appointmentDate: po.appointment?.appointmentAt || "",
+      reserved: lines.reduce((sum: number, line: any) => sum + Number(line.allocated || line.reserved || 0), 0),
+      dispatched: lines.reduce((sum: number, line: any) => sum + Number(line.dispatched || 0), 0),
+      delivered: lines.reduce((sum: number, line: any) => sum + Number(line.delivered || 0), 0),
+      shortage: po.shortage || 0,
+      shipments: shipments.length,
+      invoice: po.invoice?.invoice_number || po.invoice?.invoiceNumber || "",
+    });
+  }
+
+  const lineSheet = workbook.addWorksheet("PO lines");
+  lineSheet.columns = [
+    { header: "PO number", key: "poNumber", width: 20 },
+    { header: "SKU", key: "sku", width: 24 },
+    { header: "SKU name", key: "skuName", width: 32 },
+    { header: "Ordered", key: "ordered", width: 14 },
+    { header: "Reserved", key: "reserved", width: 14 },
+    { header: "Dispatched", key: "dispatched", width: 14 },
+    { header: "Delivered", key: "delivered", width: 14 },
+    { header: "Short", key: "short", width: 12 },
+    { header: "Damaged", key: "damaged", width: 12 },
+    { header: "Rejected", key: "rejected", width: 12 },
+  ];
+  for (const po of pos) for (const line of po.lines || []) {
+    lineSheet.addRow({
+      poNumber: po.externalId || po.external_id,
+      sku: line.sku?.code || line.sku_id || "",
+      skuName: line.sku?.name || "",
+      ordered: line.ordered || 0,
+      reserved: line.allocated || line.reserved || 0,
+      dispatched: line.dispatched || 0,
+      delivered: line.delivered || 0,
+      short: line.short || line.shortage || 0,
+      damaged: line.damaged || 0,
+      rejected: line.rejected || 0,
+    });
+  }
+
+  const shipmentSheet = workbook.addWorksheet("Shipments");
+  shipmentSheet.columns = [
+    { header: "PO number", key: "poNumber", width: 20 },
+    { header: "Shipment number", key: "shipmentNumber", width: 22 },
+    { header: "Status", key: "status", width: 22 },
+    { header: "Source warehouse", key: "sourceWarehouse", width: 24 },
+    { header: "Destination", key: "destination", width: 34 },
+    { header: "Planned dispatch", key: "plannedDispatch", width: 22 },
+    { header: "Actual dispatch", key: "actualDispatch", width: 22 },
+    { header: "Expected arrival", key: "expectedArrival", width: 22 },
+    { header: "Actual arrival", key: "actualArrival", width: 22 },
+  ];
+  for (const po of pos) for (const shipment of po.shipments || []) {
+    shipmentSheet.addRow({
+      poNumber: po.externalId || po.external_id,
+      shipmentNumber: shipment.shipment_number || shipment.shipmentNumber || "",
+      status: shipment.status || "",
+      sourceWarehouse: po.warehouse?.name || po.warehouse?.code || "",
+      destination: shipment.destination_name || shipment.destinationName || po.destination || "",
+      plannedDispatch: shipment.planned_dispatch_at || shipment.plannedDispatchAt || "",
+      actualDispatch: shipment.actual_dispatch_at || shipment.actualDispatchAt || "",
+      expectedArrival: shipment.expected_arrival_at || shipment.expectedArrivalAt || "",
+      actualArrival: shipment.actual_arrival_at || shipment.actualArrivalAt || "",
+    });
+  }
+  for (const sheet of [poSheet, lineSheet, shipmentSheet]) {
+    sheet.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF17324D" } };
+    sheet.views = [{ state: "frozen", ySplit: 1 }];
+    sheet.autoFilter = { from: "A1", to: `${String.fromCharCode(64 + Math.min(sheet.columnCount, 26))}1` };
+  }
+  const bytes = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `scm-po-export-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 function Inbox({
   pos,
   query,
   onSelect,
   onAction,
   onRefresh,
+  canApprove,
 }: {
   pos: PO[];
   query: string;
   onSelect: (p: PO) => void;
   onAction: Function;
   onRefresh: Function;
+  canApprove: boolean;
 }) {
   const [show, setShow] = useState(false),
     [filters, setFilters] = useState<PoFilters>(emptyPoFilters);
@@ -648,9 +809,14 @@ function Inbox({
         </UiButton>
       </div>
       <Section title={`${filteredPos.length} of ${pos.length} purchase orders`} action={
-        <button onClick={clearFilters} disabled={!activeFilterCount} className="text-sm font-semibold text-emerald-700 disabled:text-slate-300">
-          Clear filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
-        </button>
+        <div className="flex items-center gap-4">
+          <button onClick={() => exportPurchaseOrders(filteredPos)} disabled={!filteredPos.length} className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-700 disabled:text-slate-300">
+            <Download size={14} /> Export Excel
+          </button>
+          <button onClick={clearFilters} disabled={!activeFilterCount} className="text-sm font-semibold text-emerald-700 disabled:text-slate-300">
+            Clear filters{activeFilterCount ? ` (${activeFilterCount})` : ''}
+          </button>
+        </div>
       }>
         <div className="grid gap-3 border-b border-slate-100 bg-white p-5 md:grid-cols-3 lg:grid-cols-4">
           <select aria-label="Filter by status" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.status} onChange={e => updateFilter('status', e.target.value)}>
@@ -712,7 +878,7 @@ function Inbox({
               </Badge>
             </div>
             <div>
-              {(p.status === "UNDER_REVIEW" || p.status === "APPOINTMENT_MATCHED_AWAITING_ACCEPTANCE") && (
+              {canApprove && (p.status === "UNDER_REVIEW" || p.status === "APPOINTMENT_MATCHED_AWAITING_ACCEPTANCE") && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -848,7 +1014,8 @@ function ReviewUploadForm({
     [scan, setScan] = useState<any>(null),
     [body, setBody] = useState<any>(null),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [reviewConfirmed, setReviewConfirmed] = useState(false);
   useEffect(() => {
     api("/masters").then(setMasters);
   }, []);
@@ -870,12 +1037,16 @@ function ReviewUploadForm({
       });
       const x = await r.json();
       if (!r.ok) throw new Error(x.message || "Could not scan file");
-      setScan(x);
+      setReviewConfirmed(false);
       const extractionWarning = x.extraction?.method === "rules"
         ? `AI extraction was unavailable (${x.extraction.fallbackReason || "unknown error"}). Review the fallback result.`
         : "";
-      if (warning || extractionWarning) setError([warning, extractionWarning].filter(Boolean).join(" "));
+      const extractionWarnings = [...(x.warnings || []), warning, extractionWarning].filter(Boolean);
+      setScan({ ...x, warnings: extractionWarnings });
+      if (extractionWarnings.length) setError(extractionWarnings.join(" "));
       const extracted = x.extracted || {};
+      const destinationKey = extracted.fcCode || extracted.destination || extracted.destinationCity || "";
+      const mappedSource = uniqueDestinationMapping(masters.mappings || [], platformId, destinationKey);
       const skuValue = (sku: any, key: string) => String(sku?.[key] || "").trim().toLowerCase();
       const extractedLines = (extracted.lines || []).map((line: any) => {
         const identifiers = [line.channelItemCode, line.asin, line.ean].filter(Boolean).map((value: any) => String(value).trim().toLowerCase());
@@ -887,14 +1058,14 @@ function ReviewUploadForm({
       setBody({
         platformId,
         externalId: extracted.externalId || "",
-        destination: extracted.fcCode || extracted.destination || extracted.destinationCity || "",
+        destination: destinationKey,
         destinationName: extracted.destinationAddress || extracted.destination || extracted.destinationCity || extracted.fcCode || "",
         destinationAddress: extracted.destinationAddress || extracted.destination || "",
         destinationCity: extracted.destinationCity || "",
         sourceAddress: extracted.sourceAddress || "",
         sourceCity: extracted.sourceCity || "",
-        sourceWarehouseId: (masters.warehouses || []).find((warehouse: any) => String(warehouse.city || '').toLowerCase() === String(extracted.sourceCity || '').toLowerCase())?.id || "",
-        sourceLocationId: "",
+        sourceWarehouseId: mappedSource?.source_site_id || uniqueWarehouseId(masters.warehouses || [], extracted.sourceCity || "", extracted.sourcePostalCode || ""),
+        sourceLocationId: mappedSource?.source_location_id || "",
         sourceState: extracted.sourceState || "",
         sourcePostalCode: extracted.sourcePostalCode || "",
         destinationState: extracted.destinationState || "",
@@ -922,20 +1093,31 @@ function ReviewUploadForm({
     setError("");
     setFile(null);
     setScan({ confidence: 0, manual: true });
+    setReviewConfirmed(true);
     setBody({ platformId, externalId: "", destination: "", destinationName: "", destinationAddress: "", destinationCity: "", sourceAddress: "", sourceCity: "", sourceWarehouseId: "", sourceLocationId: "", sourceState: "", sourcePostalCode: "", destinationState: "", destinationPostalCode: "", poDate: "", deadline: "", customer: "", totalValue: 0, lines: [] });
   };
   const addLine = () =>
     setBody((b: any) => ({
       ...b,
-      lines: [...(b.lines || []), { skuId: "", ordered: 0, unitPrice: 0 }],
+      lines: [...(b.lines || []), { skuId: "", ordered: "", unitPrice: "" }],
     }));
+  const reviewWarnings = scan?.manual ? [] : [...(scan?.warnings || []), Number(scan?.confidence || 0) < 0.8 ? "Extraction confidence is below 80%; verify the document fields manually." : ""].filter(Boolean);
   const save = async () => {
+    if (reviewWarnings.length && !reviewConfirmed) {
+      setError("Review the extraction warnings and confirm the corrected values before saving.");
+      return;
+    }
+    const lines = (body.lines || []).map((line: any) => ({
+      ...line,
+      ordered: Number(line.ordered),
+      unitPrice: line.unitPrice === "" || line.unitPrice == null ? 0 : Number(line.unitPrice),
+    }));
     if (
       !body.externalId ||
       !body.poDate ||
       !body.destination ||
-      !body.lines.length ||
-      body.lines.some((l: any) => !l.skuId || Number(l.ordered) <= 0)
+      !lines.length ||
+      lines.some((l: any) => !l.skuId || !Number.isFinite(l.ordered) || l.ordered <= 0 || !Number.isFinite(l.unitPrice) || l.unitPrice < 0)
     ) {
       setError(
         "Complete PO ID, date, destination, and at least one valid SKU line.",
@@ -943,7 +1125,7 @@ function ReviewUploadForm({
       return;
     }
     setBusy(true);
-    const saved = await onAction("/api/pos", body);
+    const saved = await onAction("/api/pos", { ...body, lines });
     setBusy(false);
     if (saved) onClose();
   };
@@ -1250,7 +1432,7 @@ function ReviewUploadForm({
                                 const lines = [...body.lines];
                                 lines[i] = {
                                   ...l,
-                                  ordered: Number(e.target.value),
+                                  ordered: e.target.value,
                                 };
                                 setBody({ ...body, lines });
                               }}
@@ -1263,7 +1445,7 @@ function ReviewUploadForm({
                                 const lines = [...body.lines];
                                 lines[i] = {
                                   ...l,
-                                  unitPrice: Number(e.target.value),
+                                  unitPrice: e.target.value,
                                 };
                                 setBody({ ...body, lines });
                               }}
@@ -1317,6 +1499,7 @@ function ReviewUploadForm({
                           {error}
                         </UiAlert>
                       )}
+                      {reviewWarnings.length > 0 && <label className="mt-4 flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><input type="checkbox" checked={reviewConfirmed} onChange={e => setReviewConfirmed(e.target.checked)} className="mt-1" /><span><strong>Extraction warnings reviewed.</strong><span className="mt-1 block">I confirm the source, destination, PO number, and quantities are correct.</span></span></label>}
                       <UiButton
                         disabled={busy}
                         onClick={save}
@@ -1537,7 +1720,7 @@ function Appointments({ pos }: { pos: PO[]; onAction: Function }) {
               {isExpanded && (
                 <div className="border-t border-emerald-100 bg-emerald-50/30 px-8 py-5">
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {[['PO status', p.status?.replaceAll('_', ' ') || '—'], ['Source address', p.appointment?.sourceAddress || p.sourceAddress || p.warehouse?.address_line1 || 'Not provided'], ['Destination address', p.appointment?.destinationAddress || p.destinationAddress || p.destination || 'Not provided'], ['Warehouse', p.warehouse?.name || 'Mapping required'], ['Customer', p.customer || '—'], ['Platform', p.platform?.name || '—'], ['Appointment status', p.appointment?.status || 'Pending booking'], ['Appointment date', p.appointment?.appointmentAt ? new Date(p.appointment.appointmentAt).toLocaleString() : 'Not attached']].map(([label, value]) => (
+                    {[['PO status', p.status?.replaceAll('_', ' ') || '—'], ['PO source address', p.sourceAddress || 'Not provided'], ['Appointment source address', p.appointment?.sourceAddress || 'Not attached / not extracted'], ['PO destination address', p.destinationAddress || p.destination || 'Not provided'], ['Appointment destination address', p.appointment?.destinationAddress || 'Not attached / not extracted'], ['Source warehouse', p.warehouse?.name || 'Mapping required'], ['Master warehouse address', p.warehouse?.address_line1 || 'Not mapped'], ['Customer', p.customer || '—'], ['Platform', p.platform?.name || '—'], ['Appointment status', p.appointment?.status || 'Pending booking'], ['Appointment date', p.appointment?.appointmentAt ? new Date(p.appointment.appointmentAt).toLocaleString() : 'Not attached']].map(([label, value]) => (
                       <div key={label} className="rounded-xl bg-white p-3">
                         <div className="text-xs text-slate-400">{label}</div>
                         <div className="mt-1 text-sm font-medium">{value}</div>
@@ -1669,6 +1852,9 @@ function AdminModal({ title, children, close }: { title: string; children: any; 
 }
 function Masters({ data, onAction }: { data: any; onAction: Function }) {
   const [modal, setModal] = useState<'platform' | 'warehouse' | null>(null), [edit, setEdit] = useState<any>(null), [error, setError] = useState('');
+  const destinations = data.destinationFacilities?.length
+    ? data.destinationFacilities
+    : (Array.from(new Map((data.mappings || []).map((mapping: any) => [mapping.destination_key, mapping])).values()) as any[]);
   const open = (type: 'platform' | 'warehouse', value?: any) => { setError(''); setEdit(value || null); setModal(type); };
   const save = async (path: string, body: any) => { setError(''); const ok = await onAction(path, body, (message: string) => setError(message)); if (ok) { setModal(null); setEdit(null); location.reload(); } };
   const remove = async (path: string) => { if (window.confirm('Delete this record permanently? This will fail if it is already used in historical data.')) await save(path, {}); };
@@ -1678,9 +1864,15 @@ function Masters({ data, onAction }: { data: any; onAction: Function }) {
       <Section title="Platforms" action={<button onClick={() => open('platform')} className="rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white"><Plus size={14} className="mr-1 inline"/>Add platform</button>}>
         <div className="p-5 space-y-4">{(data.platforms || []).map((x: any) => <div className="flex items-center justify-between gap-3 text-sm" key={x.id}><div><div className="font-medium">{x.name}</div><div className="mono text-xs text-slate-400">{x.code} · {x.channel_type || 'MARKETPLACE'}</div></div><div className="flex items-center gap-2"><Badge tone={x.active === false ? 'slate' : 'green'}>{x.active === false ? 'Inactive' : 'Active'}</Badge><button onClick={() => open('platform', x)} className="text-xs font-semibold text-emerald-700">Edit</button></div></div>)}</div>
       </Section>
-      <Section title="Warehouses" action={<button onClick={() => open('warehouse')} className="rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white"><Plus size={14} className="mr-1 inline"/>Add warehouse</button>}>
+       <Section title="Source warehouses" action={<button onClick={() => open('warehouse')} className="rounded-lg bg-ink px-3 py-2 text-xs font-semibold text-white"><Plus size={14} className="mr-1 inline"/>Add warehouse</button>}>
         <div className="p-5 space-y-4">{(data.warehouses || []).map((x: any) => <div className="flex items-center justify-between gap-3 text-sm" key={x.id}><div><div className="font-medium">{x.name}</div><div className="text-xs text-slate-500">{x.city || 'City not set'}{x.state ? ` · ${x.state}` : ''}</div><div className="mono text-xs text-slate-400">{x.code}</div></div><div className="flex items-center gap-2"><Badge tone={x.active === false ? 'slate' : 'green'}>{x.active === false ? 'Inactive' : 'Active'}</Badge><button onClick={() => open('warehouse', x)} className="text-xs font-semibold text-emerald-700">Edit</button></div></div>)}</div>
       </Section>
+       <Section title="Destination facilities">
+         <div className="p-5 space-y-4">{destinations.length ? destinations.map((x: any) => <div className="text-sm" key={x.id || x.destination_key}><div className="font-medium">{x.name || x.destination_name || x.code || x.destination_key}</div><div className="mono text-xs text-slate-400">{x.fc_code || x.code || x.destination_key}</div><div className="text-xs text-slate-500">{x.city || 'Address not enriched'} · linked destination facility</div></div>) : <p className="text-sm text-slate-500">No destination facilities have been mapped yet.</p>}</div>
+       </Section>
+       <Section title="Transit routes">
+         <div className="p-5 space-y-4">{(data.routes || []).length ? (data.routes || []).map((x: any) => <div className="text-sm" key={x.id}><div className="font-medium">{x.destination_city || x.destination_key}</div><div className="text-xs text-slate-500">{x.transit_hours} hours · {x.currency || 'INR'} {Number(x.estimated_cost || 0).toLocaleString()}</div></div>) : <p className="text-sm text-slate-500">No transit routes configured yet.</p>}</div>
+       </Section>
       <Section title="SKUs"><div className="p-5 space-y-4">{(data.skus || []).map((x: any) => <div className="flex justify-between text-sm" key={x.id}><span>{x.name}</span><span className="mono text-xs text-slate-400">{x.code}</span></div>)}</div></Section>
     </div>
     {modal === 'platform' && <AdminModal title={edit ? 'Edit platform' : 'Add platform'} close={() => setModal(null)}><PlatformAdminForm value={edit} error={error} save={(body: any) => save(edit ? `/api/platforms/${edit.id}` : '/api/platforms', body)} remove={() => remove(`/api/platforms/${edit.id}/delete`)} /></AdminModal>}

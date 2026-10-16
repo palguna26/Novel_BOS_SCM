@@ -31,6 +31,7 @@ export class AppController {
   @Post('uoms') uom(@Req() req: any, @Body() body: any) { return this.service.createUom(req.user, body); }
   @Post('uoms/:id') updateUom(@Req() req: any, @Param('id') id: string, @Body() body: any) { return this.service.updateUom(req.user, id, body); }
   @Post('inventory/add') add(@Req() req: any, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.addStock(req.user, body, key); }
+  @Post('inventory/adjust') adjust(@Req() req: any, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.adjustStock(req.user, body, key); }
   @Post('inventory/policies') policy(@Req() req: any, @Body() body: any) { return this.service.updateInventoryPolicy(req.user, body); }
   @Post('pos') createPo(@Req() req: any, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.createPo(req.user, body, key); }
   @Post('pos/:id/update') updatePo(@Req() req: any, @Param('id') id: string, @Body() body: any, @Headers('idempotency-key') key?: string) { return this.service.updatePo(req.user, id, body, key); }
