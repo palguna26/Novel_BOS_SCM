@@ -34,6 +34,7 @@ import {
   MessageCircle,
   Menu,
   Download,
+  BookOpen,
 } from "lucide-react";
 import "./index.css";
 import { Button as UiButton } from "./components/ui/button";
@@ -53,6 +54,7 @@ import { DocumentLink } from "./components/DocumentLink";
 import { ShipmentPlanModal } from "./components/ShipmentPlanModal";
 import { ShortCloseModal } from "./components/ShortCloseModal";
 import { CopilotPanel } from "./components/CopilotPanel";
+import { GuidePanel } from "./components/GuidePanel";
 import {
   DOCUMENT_ACCEPT,
   DOCUMENT_FORMATS,
@@ -245,6 +247,7 @@ function App() {
     [editingPo, setEditingPo] = useState<PO | null>(null),
     [toast, setToast] = useState(""),
     [copilotOpen, setCopilotOpen] = useState(false),
+    [guideOpen, setGuideOpen] = useState(false),
     [globalSearch, setGlobalSearch] = useState(""),
     [mobileNavOpen, setMobileNavOpen] = useState(false),
     [loading, setLoading] = useState(false),
@@ -394,7 +397,10 @@ function App() {
             <div aria-label={`Signed in as ${user.name}`} className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 font-semibold text-emerald-700">
               {user.name[0]}
             </div>
-            <button aria-label="Open Copilot" onClick={() => setCopilotOpen(true)} className="flex min-h-10 items-center gap-2 rounded-xl bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
+            <button aria-label="Open Guide" onClick={() => { setGuideOpen(true); setCopilotOpen(false); }} className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-emerald-400 hover:text-emerald-700">
+              <BookOpen size={16} /> <span className="hidden sm:inline">Guide</span>
+            </button>
+            <button aria-label="Open Copilot" onClick={() => { setCopilotOpen(true); setGuideOpen(false); }} className="flex min-h-10 items-center gap-2 rounded-xl bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
               <MessageCircle size={16} /> <span className="hidden sm:inline">Copilot</span>
             </button>
           </div>
@@ -462,6 +468,7 @@ function App() {
       {invoicePo && <DocumentWorkflowModal apiBase={API} mode="invoice" po={invoicePo} onClose={() => setInvoicePo(null)} onSaved={() => { setInvoicePo(null); refresh(); }} />}
       {podSelection && <DocumentWorkflowModal apiBase={API} mode="pod" po={podSelection.po} shipmentId={podSelection.shipmentId} onClose={() => setPodSelection(null)} onSaved={() => { setPodSelection(null); refresh(); }} />}
       {editingPo && <EditPoModal po={editingPo} masters={data.masters || {}} onClose={() => setEditingPo(null)} onAction={action} onSaved={() => { setEditingPo(null); setSelected(null); }} />}
+      {guideOpen && <GuidePanel page={page} context={selected ? { selectedPo: selected.externalId } : undefined} onClose={() => setGuideOpen(false)} />}
       {copilotOpen && <CopilotPanel api={api} page={page} context={selected ? { selectedPo: selected.externalId } : undefined} onClose={() => setCopilotOpen(false)} />}
     </div>
   );
