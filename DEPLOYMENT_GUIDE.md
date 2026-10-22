@@ -105,7 +105,7 @@ Add these environment variables:
 | `OPENROUTER_TIMEOUT_MS` | `30000` |
 | `SALES_INTEGRATION_TOKEN` | Optional; leave empty if unused |
 | `SALES_INTEGRATION_COMPANY_ID` | Optional; leave empty if unused |
-| `SALES_INTEGRATION_SCOPES` | `master:read,inventory:read,po:read,fulfilment:read,movement:read` |
+| `SALES_INTEGRATION_SCOPES` | `master:read,inventory:read,po:read,fulfilment:read,movement:read,changes:read` |
 
 Do not manually set `PORT`. Render supplies it, and the API already listens on `process.env.PORT`.
 

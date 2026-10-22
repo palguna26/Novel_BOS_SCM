@@ -4,7 +4,7 @@ import {
   type InputHTMLAttributes,
   type SelectHTMLAttributes,
 } from "react";
-import { AlertTriangle, History, Plus, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, History, Plus, X } from "lucide-react";
 
 type Props = {
   rows: any[];
@@ -174,7 +174,43 @@ function StockDetail({ value }: any) {
   );
 }
 
-function InventoryHistory({ transactions }: { transactions: any[] }) {
+export function summarizeInventoryEntries(entries: any[], masters: any) {
+  const skus = masters?.skus || [];
+  const warehouses = masters?.warehouses || [];
+  const locations = masters?.locations || [];
+  const grouped = new Map<string, any>();
+
+  for (const entry of entries || []) {
+    const key = [entry.item_id, entry.stock_state, entry.site_id, entry.location_id, entry.uom_id].join(":");
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.quantity_delta += Number(entry.quantity_delta || 0);
+      existing.entryCount += 1;
+      continue;
+    }
+    const sku = skus.find((item: any) => item.id === entry.item_id);
+    const warehouse = warehouses.find((site: any) => site.id === entry.site_id);
+    const location = locations.find((item: any) => item.id === entry.location_id);
+    grouped.set(key, {
+      ...entry,
+      quantity_delta: Number(entry.quantity_delta || 0),
+      entryCount: 1,
+      skuLabel: sku ? `${sku.code || "SKU"} · ${sku.name || "Unnamed item"}` : entry.item_id || "Unknown SKU",
+      warehouseLabel: warehouse?.name || "Unknown warehouse",
+      locationLabel: location?.name || location?.code || "Unknown location",
+    });
+  }
+
+  return [...grouped.values()].filter((entry) => Math.abs(entry.quantity_delta) > 0.000001);
+}
+
+function formatQuantity(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(value);
+}
+
+function InventoryHistory({ transactions, masters }: { transactions: any[]; masters: any }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
   return (
     <div className="panel mt-5 overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 p-5">
@@ -188,25 +224,42 @@ function InventoryHistory({ transactions }: { transactions: any[] }) {
         <div className="p-5 text-sm text-slate-500">No inventory transactions found.</div>
       ) : (
         <div className="divide-y divide-slate-100">
-          {transactions.map((transaction: any) => (
-            <div key={transaction.id} className="grid gap-2 px-5 py-4 text-sm md:grid-cols-[1fr_1fr_1.5fr_1fr] md:items-center">
-              <div>
-                <div className="font-semibold">{transaction.transaction_type}</div>
-                <div className="text-xs text-slate-400">{new Date(transaction.created_at).toLocaleString()}</div>
+          {transactions.map((transaction: any) => {
+            const entries = summarizeInventoryEntries(transaction.entries, masters);
+            const isExpanded = Boolean(expanded[transaction.id]);
+            const netQuantity = entries.reduce((sum, entry) => sum + Number(entry.quantity_delta || 0), 0);
+            return (
+              <div key={transaction.id} className="border-t border-slate-100 px-5 py-4 text-sm">
+                <button type="button" onClick={() => setExpanded((current) => ({ ...current, [transaction.id]: !isExpanded }))} className="grid w-full gap-3 text-left md:grid-cols-[1.1fr_1fr_1.5fr_auto] md:items-center">
+                  <div className="flex items-start gap-2">
+                    {isExpanded ? <ChevronDown size={16} className="mt-0.5 shrink-0 text-slate-400" /> : <ChevronRight size={16} className="mt-0.5 shrink-0 text-slate-400" />}
+                    <div>
+                      <div className="font-semibold">{transaction.transaction_type}{transaction.document_number ? ` · ${transaction.document_number}` : ""}</div>
+                      <div className="text-xs text-slate-400">{new Date(transaction.created_at || transaction.posting_at).toLocaleString()}</div>
+                    </div>
+                  </div>
+                  <div className="text-slate-600">{entries.length} balance line{entries.length === 1 ? "" : "s"} · net {formatQuantity(netQuantity)}</div>
+                  <div className="text-slate-500">{transaction.reason || "No reason recorded"}</div>
+                  <span className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${transaction.status === "REVERSED" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>{transaction.status}</span>
+                </button>
+                {isExpanded && (
+                  <div className="mt-4 overflow-x-auto rounded-lg border border-slate-100">
+                    <div className="grid min-w-[680px] grid-cols-[1.5fr_1fr_1.2fr_auto] gap-3 bg-slate-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      <span>SKU</span><span>Stock state</span><span>Warehouse / location</span><span>Change</span>
+                    </div>
+                    {entries.map((entry: any) => (
+                      <div key={`${transaction.id}-${entry.item_id}-${entry.stock_state}-${entry.location_id}`} className="grid min-w-[680px] grid-cols-[1.5fr_1fr_1.2fr_auto] gap-3 border-t border-slate-100 px-3 py-3 text-xs">
+                        <div><div className="font-semibold text-slate-700">{entry.skuLabel}</div><div className="mt-1 text-slate-400">{entry.entryCount > 1 ? `${entry.entryCount} ledger rows combined` : "1 ledger row"}</div></div>
+                        <span className="text-slate-600">{String(entry.stock_state || "Unknown").replace(/_/g, " ")}</span>
+                        <span className="text-slate-600">{entry.warehouseLabel} / {entry.locationLabel}</span>
+                        <span className={`font-semibold ${Number(entry.quantity_delta) > 0 ? "text-emerald-700" : "text-red-600"}`}>{Number(entry.quantity_delta) > 0 ? "+" : ""}{formatQuantity(Number(entry.quantity_delta))}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="text-slate-600">
-                {(transaction.entries || []).map((entry: any) => (
-                  <div key={entry.id}>{Number(entry.quantity_delta) > 0 ? "+" : ""}{entry.quantity_delta}</div>
-                ))}
-              </div>
-              <div className="text-slate-500">{transaction.reason || "No reason recorded"}</div>
-              <div className="md:text-right">
-                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${transaction.status === "REVERSED" ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>
-                  {transaction.status}
-                </span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -658,7 +711,7 @@ export function InventoryWorkspace({
               );
             })}
           </List>
-          <InventoryHistory transactions={transactions} />
+          <InventoryHistory transactions={transactions} masters={masters} />
         </>
       )}
       {tab === "SKUs" && (

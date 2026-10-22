@@ -46,7 +46,7 @@ services:
       - key: SALES_INTEGRATION_COMPANY_ID
         sync: false
       - key: SALES_INTEGRATION_SCOPES
-        value: master:read,inventory:read,po:read,fulfilment:read,movement:read
+        value: master:read,inventory:read,po:read,fulfilment:read,movement:read,changes:read
 
   - type: web
     name: novel-scm-web
