@@ -293,7 +293,7 @@ export class IntegrationService {
   async pods(context: IntegrationContext, query: IntegrationQuery) {
     this.scope(context, 'fulfilment:read');
     const [pods, lines, links] = await Promise.all([
-      this.rows(context, 'scm', 'pods', query, 'created_at'),
+      this.rows(context, 'scm', 'pods', query, 'delivery_at'),
       this.rows(context, 'scm', 'pod_lines', query),
       this.rows(context, 'scm', 'pod_shipment_links', query, 'pod_id'),
     ]);
