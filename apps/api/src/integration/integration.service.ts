@@ -79,6 +79,42 @@ export class IntegrationService {
     return (data || []) as Row[];
   }
 
+  private async rowsForPurchaseOrder(context: IntegrationContext, schema: string, table: string, purchaseOrderId: string, order = 'id') {
+    const { data, error } = await this.supabase.schema(schema).from(table).select('*')
+      .eq('company_id', context.companyId).eq('purchase_order_id', purchaseOrderId)
+      .order(order, { ascending: true });
+    if (error) throw new BadRequestException(error.message);
+    return (data || []) as Row[];
+  }
+
+  private decimalString(value: unknown) { return String(value ?? 0); }
+
+  private serializePoLineState(row: Row) {
+    return {
+      ...row,
+      ordered_quantity: this.decimalString(row.ordered_quantity),
+      accepted_quantity: this.decimalString(row.accepted_quantity),
+      rejected_quantity: this.decimalString(row.rejected_quantity),
+      reserved_quantity: this.decimalString(row.reserved_quantity),
+      dispatched_quantity: this.decimalString(row.dispatched_quantity),
+      delivered_quantity: this.decimalString(row.delivered_quantity),
+      damaged_quantity: this.decimalString(row.damaged_quantity),
+      delivery_rejected_quantity: this.decimalString(row.delivery_rejected_quantity ?? row.rejected_delivery_quantity),
+      approved_short_close_quantity: this.decimalString(row.approved_short_close_quantity),
+      outstanding_quantity: this.decimalString(row.outstanding_quantity),
+      orderedQuantity: this.decimalString(row.ordered_quantity),
+      acceptedQuantity: this.decimalString(row.accepted_quantity),
+      rejectedQuantity: this.decimalString(row.rejected_quantity),
+      reservedQuantity: this.decimalString(row.reserved_quantity),
+      dispatchedQuantity: this.decimalString(row.dispatched_quantity),
+      deliveredQuantity: this.decimalString(row.delivered_quantity),
+      damagedQuantity: this.decimalString(row.damaged_quantity),
+      rejectedDeliveryQuantity: this.decimalString(row.delivery_rejected_quantity ?? row.rejected_delivery_quantity),
+      approvedShortCloseQuantity: this.decimalString(row.approved_short_close_quantity),
+      outstandingQuantity: this.decimalString(row.outstanding_quantity),
+    };
+  }
+
   private async joinItems(context: IntegrationContext, rows: Row[]) {
     const items = await this.rows(context, 'master_data', 'items', {});
     const byId = new Map(items.map(item => [item.id, item]));
@@ -225,17 +261,25 @@ export class IntegrationService {
     ]);
     const gateByPo = new Map(gates.map(gate => [gate.purchase_order_id, gate]));
     const linesByPo = new Map<string, Row[]>();
-    for (const line of lines) linesByPo.set(line.purchase_order_id, [...(linesByPo.get(line.purchase_order_id) || []), { ...line, orderedQuantity: String(line.ordered_quantity), unitPrice: String(line.unit_price) }]);
-    const stateByLine = new Map(states.map(state => [state.purchase_order_line_id, state]));
-    const data = pos.map(po => ({ ...po, totalValue: String(po.total_value), lines: (linesByPo.get(po.id) || []).map(line => ({ ...line, state: stateByLine.get(line.id) || null })), gate: gateByPo.get(po.id) || null }));
+    const stateByLine = new Map(states.map(state => [state.purchase_order_line_id, this.serializePoLineState(state)]));
+    for (const line of lines) linesByPo.set(line.purchase_order_id, [...(linesByPo.get(line.purchase_order_id) || []), { ...line, orderedQuantity: this.decimalString(line.ordered_quantity), unitPrice: this.decimalString(line.unit_price), state: stateByLine.get(line.id) || null }]);
+    const data = pos.map(po => ({ ...po, totalValue: this.decimalString(po.total_value), lines: linesByPo.get(po.id) || [], gate: gateByPo.get(po.id) || null }));
     return this.page(data, query, this.requestId());
   }
 
   async purchaseOrder(context: IntegrationContext, id: string) {
     this.scope(context, 'po:read');
-    const result = await this.purchaseOrders(context, { purchaseOrderId: id, limit: '1' });
-    if (!result.data.length) throw new NotFoundException('Purchase order not found');
-    return { data: result.data[0], meta: result.meta };
+    const [pos, lines, gates, states] = await Promise.all([
+      this.rowsForPurchaseOrder(context, 'scm', 'purchase_orders', id, 'created_at'),
+      this.rowsForPurchaseOrder(context, 'scm', 'purchase_order_lines', id),
+      this.rowsForPurchaseOrder(context, 'scm', 'po_gate_state_v', id),
+      this.rowsForPurchaseOrder(context, 'integration', 'po_line_state_v', id),
+    ]);
+    const po = pos[0];
+    if (!po) throw new NotFoundException('Purchase order not found');
+    const stateByLine = new Map(states.map(state => [state.purchase_order_line_id, this.serializePoLineState(state)]));
+    const gate = gates[0] || null;
+    return { data: { ...po, totalValue: this.decimalString(po.total_value), gate, lines: lines.map(line => ({ ...line, orderedQuantity: this.decimalString(line.ordered_quantity), unitPrice: this.decimalString(line.unit_price), state: stateByLine.get(line.id) || null })) }, meta: { requestId: this.requestId(), asOf: new Date().toISOString() } };
   }
 
   async gates(context: IntegrationContext, query: IntegrationQuery) {
@@ -246,7 +290,7 @@ export class IntegrationService {
 
   async purchaseOrderLines(context: IntegrationContext, query: IntegrationQuery) {
     this.scope(context, 'po:read');
-    return this.page(await this.rows(context, 'integration', 'po_line_state_v', query, 'purchase_order_line_id'), query, this.requestId());
+    return this.page((await this.rows(context, 'integration', 'po_line_state_v', query, 'purchase_order_line_id')).map(row => this.serializePoLineState(row)), query, this.requestId());
   }
 
   async reservations(context: IntegrationContext, query: IntegrationQuery) {
